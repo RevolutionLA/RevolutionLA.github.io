@@ -1,0 +1,11 @@
+# 依赖与本地产物
+node_modules/
+.DS_Store
+Thumbs.db
+
+# DSH 视觉/临时产物（不入库）
+.dsh-vision-router/
+*.shot-*.png
+
+# 本地预览产物
+examples/

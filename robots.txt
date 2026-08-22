@@ -1,0 +1,7 @@
+# RevolutionLA.github.io · robots.txt
+# 允许所有搜索引擎抓取
+User-agent: *
+Allow: /
+
+# 站点地图
+Sitemap: https://RevolutionLA.github.io/sitemap.xml
