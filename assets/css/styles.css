@@ -336,6 +336,65 @@ a { color: inherit; text-decoration: none; }
 }
 .tags li:hover { border-color: var(--signal); color: var(--signal); }
 
+/* ==================== Projects ==================== */
+.projects-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 22px;
+}
+.project-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, var(--space-2), var(--space-1));
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  padding: 36px;
+  text-decoration: none;
+  transition: transform .3s, border-color .3s, box-shadow .3s;
+  overflow: hidden;
+}
+.project-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 100% 0%, var(--signal-dim), transparent 55%);
+  opacity: 0;
+  transition: opacity .3s;
+}
+.project-card:hover {
+  transform: translateY(-6px);
+  border-color: var(--stroke-bright);
+  box-shadow: 0 18px 48px rgba(0,0,0,0.5), 0 0 30px var(--signal-dim);
+}
+.project-card:hover::after { opacity: 1; }
+.project-card > * { position: relative; z-index: 1; }
+.pc-status { font-size: 11px; letter-spacing: 0.14em; color: var(--signal); margin-bottom: 20px; }
+.pc-name {
+  font-family: var(--display);
+  font-size: clamp(26px, 3vw, 34px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-bottom: 12px;
+  color: var(--ink);
+}
+.pc-desc {
+  flex: 1;
+  font-size: 15px;
+  color: var(--ink-dim);
+  margin-bottom: 24px;
+  line-height: 1.7;
+}
+.pc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-faint);
+  transition: color .2s;
+}
+.project-card:hover .pc-link { color: var(--signal); }
+
 /* ==================== Timeline ==================== */
 .timeline { border-left: 1px solid var(--stroke); padding-left: 40px; display: flex; flex-direction: column; gap: 52px; margin: 0; }
 .tl-item { position: relative; }
@@ -418,6 +477,7 @@ a:focus-visible, .btn:focus-visible {
   .about-grid { grid-template-columns: 1fr; gap: 44px; }
   .hero { padding: 40px 0 70px; }
   .contact-inner { padding: 40px 26px; }
+  .projects-grid { grid-template-columns: 1fr; }
 }
 
 /* 尊重减少动效偏好 */
