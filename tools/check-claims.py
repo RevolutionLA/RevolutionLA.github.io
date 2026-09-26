@@ -15,6 +15,8 @@ import argparse
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 import urllib.error
@@ -22,6 +24,7 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UA = {"User-Agent": "Mozilla/5.0 (claims-check; link and claim verification)"}
+CURL = shutil.which("curl")
 
 
 def _get(url, timeout=25):
@@ -36,21 +39,46 @@ def _get(url, timeout=25):
                            else type(e).__name__), b""
 
 
-def http_status(url, retries=3):
-    """Retry transport errors only: a 404 is a real finding, a reset is not."""
-    code = None
+def _curl_get(url, timeout=25):
+    """curl follows redirects and survives the connection resets this machine's
+    proxy throws at python-urllib, so a flaky transport never becomes a false finding."""
+    if not CURL:
+        return None, b""
+    try:
+        p = subprocess.run(
+            [CURL, "-sS", "-L", "-w", "\n%{http_code}", "--max-time", str(timeout), url],
+            capture_output=True, timeout=timeout + 5)
+    except Exception as e:
+        return "err:curl-%s" % type(e).__name__, b""
+    out = p.stdout
+    i = out.rfind(b"\n")
+    if i < 0:
+        return "err:curl-no-status", b""
+    code, body = out[i + 1:].strip(), out[:i]
+    return (int(code) if code.isdigit() else "err:curl-%s" % code.decode("ascii", "replace")), body
+
+
+def http_status(url, retries=2):
+    return fetch(url, retries)[0]
+
+
+def fetch(url, retries=2):
+    """Retry transport errors only: a 404 is a real finding, a connection reset is not.
+    Falls back to curl, which follows redirects and is not reset by the local proxy."""
+    code, body = None, b""
     for i in range(retries):
-        code = _get(url)[0]
+        code, body = _get(url)
         if not (isinstance(code, str) and code.startswith("err:")):
-            return code
-        time.sleep(1.5 * (i + 1))
-    return code
+            return code, body
+        time.sleep(1.2 * (i + 1))
+    ccode, cbody = _curl_get(url)
+    return (code, body) if ccode is None else (ccode, cbody)
 
 
 def stars_of(owner, repo):
     """Scrape the public repo page instead of api.github.com: the API is capped at
     60 anonymous calls/hour, which turns a passing run into a flaky failure."""
-    code, body = _get("https://github.com/%s/%s" % (owner, repo))
+    code, body = fetch("https://github.com/%s/%s" % (owner, repo))
     if code != 200:
         return code, None
     m = re.search(r'repo-stars-counter-star[^>]*title="([\d,]+)"',
@@ -154,6 +182,7 @@ def check(root):
         seen.setdefault(u.rstrip("/"), u)  # card href and JSON-LD url differ only by slash
     for key, u in sorted(seen.items()):
         code = http_status(u)
+        time.sleep(0.3)  # github resets bursts of keep-alive connections
         if code != 200:
             bad("anonymous %s for %s (visitors cannot reach it)" % (code, u))
 
@@ -177,7 +206,7 @@ def check(root):
     claims = [(int(m.group(1)), m.group(0))
               for m in re.finditer(r"收录 (\d+ 余个|近 \d+ 个)", idx)]
     if claims:
-        code, readme = _get("https://raw.githubusercontent.com/RevolutionLA/awesome-YuE/HEAD/README.md")
+        code, readme = fetch("https://raw.githubusercontent.com/RevolutionLA/awesome-YuE/HEAD/README.md")
         if code != 200:
             bad("cannot fetch awesome-YuE README anonymously (%s)" % code)
         else:
