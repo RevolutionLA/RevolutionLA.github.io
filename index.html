@@ -20,13 +20,20 @@
   <meta property="og:url" content="https://RevolutionLA.github.io/" />
   <meta property="og:site_name" content="RevolutionLA · 刘昂" />
   <meta property="og:locale" content="zh_CN" />
+  <meta property="og:image" content="https://revolutionla.github.io/assets/img/og-image.png" />
+  <meta property="og:image:secure_url" content="https://revolutionla.github.io/assets/img/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="刘昂 / RevolutionLA — 我看到的不是技术，而是可能性。" />
   <meta property="profile:first_name" content="刘" />
   <meta property="profile:last_name" content="昂" />
 
   <!-- Twitter Card -->
-  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="刘昂 (RevolutionLA) · AI 技术探索者" />
   <meta name="twitter:description" content="出身西北工业大学，曾任华为研发。深耕 AI、大模型、软硬一体与云架构。我看到的不是技术，而是可能性。" />
+  <meta name="twitter:image" content="https://revolutionla.github.io/assets/img/og-image.png" />
+  <meta name="twitter:image:alt" content="刘昂 / RevolutionLA — 我看到的不是技术，而是可能性。" />
 
   <!-- 主题与图标 -->
   <meta name="theme-color" content="#07090d" />
@@ -45,6 +52,7 @@
   {
     "@context": "https://schema.org",
     "@type": "Person",
+    "@id": "https://revolutionla.github.io/#liuang",
     "name": "刘昂",
     "alternateName": "RevolutionLA",
     "url": "https://RevolutionLA.github.io/",
@@ -69,6 +77,135 @@
     "url": "https://RevolutionLA.github.io/",
     "description": "刘昂 (RevolutionLA) 的个人主页 —— AI 领域的探索者与技术极客。",
     "inLanguage": "zh-CN"
+  }
+  </script>
+
+  <!-- ===================== 结构化数据：开源项目清单 (GEO/AI 可引用) ===================== -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    "name": "刘昂 (RevolutionLA) 的开源项目",
+    "description": "由刘昂独立开发的开源项目：AI 音乐生成工作站、昇腾智算部署工具链、DeepSeek Harness 插件生态、Agent Skill 与开源硬件。",
+    "itemListOrder": "https://schema.org/ItemListUnordered",
+    "itemListElement": [
+      {
+        "@type": "ListItem", "position": 1,
+        "item": {
+          "@type": "SoftwareApplication",
+          "name": "dsh-dream-skin",
+          "url": "https://revolutionla.github.io/dsh-dream-skin/",
+          "codeRepository": "https://github.com/RevolutionLA/dsh-dream-skin",
+          "description": "DeepSeek Harness 换肤 / 壁纸 / 主题包插件：8 套 Mirage 主题、每用户强调色、壁纸 2.0、主题包导入导出与分享链接，纯原生 token 系统实现。",
+          "applicationCategory": "MultimediaApplication",
+          "author": { "@id": "https://revolutionla.github.io/#liuang" }
+        }
+      },
+      {
+        "@type": "ListItem", "position": 2,
+        "item": {
+          "@type": "SoftwareApplication",
+          "name": "YuE2-Music-Workbench",
+          "url": "https://github.com/RevolutionLA/YuE2-Music-Workbench",
+          "codeRepository": "https://github.com/RevolutionLA/YuE2-Music-Workbench",
+          "description": "本地离线 AI 音乐生成工作站：基于 YuE2 的写歌、AI 翻唱、RVC 换声、LRC 滚动歌词与批量队列，定位为本地版 Suno 替代方案。",
+          "applicationCategory": "MultimediaApplication",
+          "operatingSystem": "Windows, Linux",
+          "author": { "@id": "https://revolutionla.github.io/#liuang" }
+        }
+      },
+      {
+        "@type": "ListItem", "position": 3,
+        "item": {
+          "@type": "SoftwareApplication",
+          "name": "AscendMate",
+          "url": "https://revolutionla.github.io/AscendMate/",
+          "codeRepository": "https://github.com/RevolutionLA/AscendMate",
+          "description": "昇腾部署易用一指禅：面向昇腾智算服务器的环境搭建、模型微调、推理部署与算子开发手册。",
+          "applicationCategory": "DeveloperApplication",
+          "author": { "@id": "https://revolutionla.github.io/#liuang" }
+        }
+      },
+      {
+        "@type": "ListItem", "position": 4,
+        "item": {
+          "@type": "SoftwareApplication",
+          "name": "ascend-assistant",
+          "url": "https://revolutionla.github.io/ascend-assistant/",
+          "codeRepository": "https://github.com/RevolutionLA/ascend-assistant",
+          "description": "昇腾服务器助手 Agent Skill：让 AI 操作、查询与排障昇腾智算服务器，覆盖环境检测、故障排查、命令生成、部署引导与性能调优。",
+          "applicationCategory": "DeveloperApplication",
+          "author": { "@id": "https://revolutionla.github.io/#liuang" }
+        }
+      },
+      {
+        "@type": "ListItem", "position": 5,
+        "item": {
+          "@type": "SoftwareApplication",
+          "name": "adversarial-review",
+          "url": "https://github.com/RevolutionLA/adversarial-review",
+          "codeRepository": "https://github.com/RevolutionLA/adversarial-review",
+          "description": "三方对抗式代码评审 Agent Skill：蓝军敌意审查 → 第三方独立审计 → 中立裁定，为 AI coding agent 提供结构化发布前评审闭环。",
+          "applicationCategory": "DeveloperApplication",
+          "author": { "@id": "https://revolutionla.github.io/#liuang" }
+        }
+      },
+      {
+        "@type": "ListItem", "position": 6,
+        "item": {
+          "@type": "SoftwareApplication",
+          "name": "dsh-mate",
+          "url": "https://github.com/RevolutionLA/dsh-mate",
+          "codeRepository": "https://github.com/RevolutionLA/dsh-mate",
+          "description": "DeepSeek Harness 的鸿蒙手机远程伴侣：电脑端插件 + 鸿蒙 App，扫码配对后远程查看与操作 AI 任务并接收推送，零账号、零登录、零信息收集。",
+          "applicationCategory": "UtilitiesApplication",
+          "author": { "@id": "https://revolutionla.github.io/#liuang" }
+        }
+      },
+      {
+        "@type": "ListItem", "position": 7,
+        "item": {
+          "@type": "CreativeWork",
+          "name": "OpenKidCar",
+          "url": "https://revolutionla.github.io/OpenKidCar/",
+          "codeRepository": "https://github.com/RevolutionLA/OpenKidCar",
+          "description": "全程开源的智能儿童卡丁车「干杯一号」：硬件、固件、电路到软件完全开放，面向亲子共创与创客入门。",
+          "author": { "@id": "https://revolutionla.github.io/#liuang" }
+        }
+      },
+      {
+        "@type": "ListItem", "position": 8,
+        "item": {
+          "@type": "CollectionPage",
+          "name": "awesome-YuE",
+          "url": "https://github.com/RevolutionLA/awesome-YuE",
+          "description": "YuE / YuE2 开源音乐生成生态精选清单：交互 UI、量化方案、ComfyUI 节点、Mac/MLX 移植、云端部署与教程，收录 70 余个相关项目。",
+          "author": { "@id": "https://revolutionla.github.io/#liuang" }
+        }
+      },
+      {
+        "@type": "ListItem", "position": 9,
+        "item": {
+          "@type": "CollectionPage",
+          "name": "awesome-dsh-plugin",
+          "url": "https://github.com/RevolutionLA/awesome-dsh-plugin",
+          "description": "DeepSeek Harness 插件生态精选清单：持续策展维护的 DSH 插件、主题包与工具链索引。",
+          "author": { "@id": "https://revolutionla.github.io/#liuang" }
+        }
+      },
+      {
+        "@type": "ListItem", "position": 10,
+        "item": {
+          "@type": "SoftwareApplication",
+          "name": "shijing 字云词云",
+          "url": "https://github.com/RevolutionLA/shijing",
+          "codeRepository": "https://github.com/RevolutionLA/shijing",
+          "description": "用 Python 统计《诗经》全文用字概率，jieba 分词后输出字云与词云的数据可视化小品。",
+          "applicationCategory": "DataVisualization",
+          "author": { "@id": "https://revolutionla.github.io/#liuang" }
+        }
+      }
+    ]
   }
   </script>
 </head>
