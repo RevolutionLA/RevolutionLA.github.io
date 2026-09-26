@@ -238,39 +238,102 @@
     <div class="sec-head">
       <span class="sec-tag mono">03 · 项目</span>
       <h2 class="sec-title">代表作品</h2>
-      <p class="sec-note">把想法做成能跑的东西。以下是我正在构建、并乐于分享的作品。</p>
+      <p class="sec-note">把想法做成能跑的东西。以下全部是我自己的项目（非 fork），按主题分区。</p>
     </div>
-    <div class="projects-grid">
-      <a class="project-card" href="https://revolutionla.github.io/AscendMate" target="_blank" rel="noopener noreferrer">
-        <span class="pc-status mono">● 已发布</span>
-        <h3 class="pc-name">AscendMate</h3>
-        <p class="pc-desc">昇腾部署易用一指禅——面向昇腾智算服务器的环境搭建、模型微调、推理部署与算子开发手册。</p>
-        <span class="pc-link mono">revolutionla.github.io/AscendMate →</span>
-      </a>
-      <a class="project-card" href="https://revolutionla.github.io/dsh-dream-skin" target="_blank" rel="noopener noreferrer">
-        <span class="pc-status mono">● 开源插件</span>
-        <h3 class="pc-name">dsh-dream-skin</h3>
-        <p class="pc-desc">DeepSeek Harness 换肤 / 壁纸 / 主题包插件——8 套 Mirage 主题、每用户强调色、主题包导入导出。</p>
-        <span class="pc-link mono">revolutionla.github.io/dsh-dream-skin →</span>
-      </a>
-      <a class="project-card" href="https://revolutionla.github.io/OpenKidCar" target="_blank" rel="noopener noreferrer">
-        <span class="pc-status mono">● 开源硬件</span>
-        <h3 class="pc-name">OpenKidCar</h3>
-        <p class="pc-desc">全程开源的小汽车项目——硬件、固件、电路到软件，完全由你掌握。</p>
-        <span class="pc-link mono">revolutionla.github.io/OpenKidCar →</span>
-      </a>
-      <a class="project-card" href="https://revolutionla.github.io/ascend-assistant" target="_blank" rel="noopener noreferrer">
-        <span class="pc-status mono">● Agent Skill</span>
-        <h3 class="pc-name">ascend-assistant</h3>
-        <p class="pc-desc">昇腾服务器助手——用 AI 操作、查询、排障昇腾智算服务器，与 AscendMate 手册深度联动。</p>
-        <span class="pc-link mono">revolutionla.github.io/ascend-assistant →</span>
-      </a>
-      <a class="project-card" href="https://github.com/RevolutionLA/adversarial-review" target="_blank" rel="noopener noreferrer">
-        <span class="pc-status mono">● Agent Skill</span>
-        <h3 class="pc-name">adversarial-review</h3>
-        <p class="pc-desc">三方对抗式代码评审——蓝军（敌意审查）→ 第三方（独立审计）→ 中立裁定，给 AI 编程 agent 的结构化对抗评审闭环。</p>
-        <span class="pc-link mono">github.com/RevolutionLA/adversarial-review →</span>
-      </a>
+
+    <!-- ===== AI 音乐 ===== -->
+    <div class="proj-group">
+      <h3 class="pg-head mono"><span class="pg-label">AI · 音乐创作</span><span class="pg-rule" aria-hidden="true"></span></h3>
+      <div class="projects-grid">
+        <a class="project-card" href="https://github.com/RevolutionLA/YuE2-Music-Workbench" target="_blank" rel="noopener noreferrer">
+          <span class="pc-status mono">● 开源工作站 · 3★</span>
+          <h3 class="pc-name">YuE2-Music-Workbench</h3>
+          <p class="pc-desc">本地 AI 音乐生成工作站——YuE2 写歌 + AI 翻唱 + RVC 换声 + LRC 滚动歌词 + 批量队列，100% 离线开箱即用。一个免费的本地 Suno 替代方案。</p>
+          <span class="pc-link mono">github.com/RevolutionLA/YuE2-Music-Workbench →</span>
+        </a>
+        <a class="project-card" href="https://github.com/RevolutionLA/awesome-YuE" target="_blank" rel="noopener noreferrer">
+          <span class="pc-status mono">● 精选清单 · 4★</span>
+          <h3 class="pc-name">awesome-YuE</h3>
+          <p class="pc-desc">YuE / YuE2 开源音乐生成生态精选清单——UI、量化、ComfyUI 节点、Mac/MLX 移植、云端部署与教程，收录 70+ 项目。</p>
+          <span class="pc-link mono">github.com/RevolutionLA/awesome-YuE →</span>
+        </a>
+      </div>
+    </div>
+
+    <!-- ===== DSH 生态 ===== -->
+    <div class="proj-group">
+      <h3 class="pg-head mono"><span class="pg-label">DSH · DeepSeek Harness 生态</span><span class="pg-rule" aria-hidden="true"></span></h3>
+      <div class="projects-grid">
+        <a class="project-card" href="https://revolutionla.github.io/dsh-dream-skin" target="_blank" rel="noopener noreferrer">
+          <span class="pc-status mono">● 开源插件 · 187★</span>
+          <h3 class="pc-name">dsh-dream-skin</h3>
+          <p class="pc-desc">DeepSeek Harness 换肤 / 壁纸 / 主题包插件——8 套 Mirage 主题、每用户强调色、壁纸 2.0、主题包导入导出与分享链接，纯原生 token 系统实现。</p>
+          <span class="pc-link mono">revolutionla.github.io/dsh-dream-skin →</span>
+        </a>
+        <a class="project-card" href="https://github.com/RevolutionLA/dsh-mate" target="_blank" rel="noopener noreferrer">
+          <span class="pc-status mono">● 插件 + 鸿蒙 App</span>
+          <h3 class="pc-name">dsh-mate · 求索伴侣</h3>
+          <p class="pc-desc">DeepSeek Harness 的鸿蒙手机远程伴侣——扫码配对后在手机上实时查看 AI 任务、发送消息、审批操作、接收推送。零账号 · 零登录 · 零信息收集。</p>
+          <span class="pc-link mono">github.com/RevolutionLA/dsh-mate →</span>
+        </a>
+      </div>
+    </div>
+
+    <!-- ===== 昇腾 ===== -->
+    <div class="proj-group">
+      <h3 class="pg-head mono"><span class="pg-label">ASCEND · 昇腾智算</span><span class="pg-rule" aria-hidden="true"></span></h3>
+      <div class="projects-grid">
+        <a class="project-card" href="https://revolutionla.github.io/AscendMate" target="_blank" rel="noopener noreferrer">
+          <span class="pc-status mono">● 已发布 · 4★</span>
+          <h3 class="pc-name">AscendMate</h3>
+          <p class="pc-desc">昇腾部署易用一指禅——面向昇腾智算服务器的环境搭建、模型微调、推理部署与算子开发手册。</p>
+          <span class="pc-link mono">revolutionla.github.io/AscendMate →</span>
+        </a>
+        <a class="project-card" href="https://revolutionla.github.io/ascend-assistant" target="_blank" rel="noopener noreferrer">
+          <span class="pc-status mono">● Agent Skill · 3★</span>
+          <h3 class="pc-name">ascend-assistant</h3>
+          <p class="pc-desc">昇腾服务器助手——用 AI 操作、查询、排障昇腾智算服务器（环境检测 / 排障 / 命令生成 / 部署引导 / 性能调优），与 AscendMate 手册深度联动。</p>
+          <span class="pc-link mono">revolutionla.github.io/ascend-assistant →</span>
+        </a>
+      </div>
+    </div>
+
+    <!-- ===== 开源硬件 ===== -->
+    <div class="proj-group">
+      <h3 class="pg-head mono"><span class="pg-label">HW · 开源硬件与数据小品</span><span class="pg-rule" aria-hidden="true"></span></h3>
+      <div class="projects-grid">
+        <a class="project-card" href="https://revolutionla.github.io/OpenKidCar" target="_blank" rel="noopener noreferrer">
+          <span class="pc-status mono">● 开源硬件 · 3★</span>
+          <h3 class="pc-name">OpenKidCar</h3>
+          <p class="pc-desc">全程开源的小汽车项目「干杯一号」——硬件、固件、电路到软件完全由你掌握，适合亲子共创与创客入门的 AI 玩具车。</p>
+          <span class="pc-link mono">revolutionla.github.io/OpenKidCar →</span>
+        </a>
+        <a class="project-card" href="https://github.com/RevolutionLA/shijing" target="_blank" rel="noopener noreferrer">
+          <span class="pc-status mono">● 数据小品</span>
+          <h3 class="pc-name">诗经 · 字云词云</h3>
+          <p class="pc-desc">用 Python 统计《诗经》全文用字概率，jieba 分词，输出字云与词云——用工程思维读一次先秦诗歌的频次之美。</p>
+          <span class="pc-link mono">github.com/RevolutionLA/shijing →</span>
+        </a>
+      </div>
+    </div>
+
+    <!-- ===== Agent Skill / 策展 ===== -->
+    <div class="proj-group">
+      <h3 class="pg-head mono"><span class="pg-label">SKILL · Agent 工程与生态策展</span><span class="pg-rule" aria-hidden="true"></span></h3>
+      <div class="projects-grid">
+        <a class="project-card" href="https://github.com/RevolutionLA/adversarial-review" target="_blank" rel="noopener noreferrer">
+          <span class="pc-status mono">● Agent Skill · 2★</span>
+          <h3 class="pc-name">adversarial-review</h3>
+          <p class="pc-desc">三方对抗式代码评审 Agent Skill——蓝军（敌意审查）→ 第三方（独立审计）→ 中立裁定，给 AI coding agent 的结构化对抗评审闭环。</p>
+          <span class="pc-link mono">github.com/RevolutionLA/adversarial-review →</span>
+        </a>
+        <a class="project-card" href="https://github.com/RevolutionLA/awesome-dsh-plugin" target="_blank" rel="noopener noreferrer">
+          <span class="pc-status mono">● 生态策展</span>
+          <h3 class="pc-name">awesome-dsh-plugin</h3>
+          <p class="pc-desc">DeepSeek Harness 插件生态精选清单——在 fork 基础上持续策展维护（1400+ 提交分叉），收录 DSH 插件、主题与工具链。</p>
+          <span class="pc-link mono">github.com/RevolutionLA/awesome-dsh-plugin →</span>
+        </a>
+      </div>
     </div>
   </section>
 
