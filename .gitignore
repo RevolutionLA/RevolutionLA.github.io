@@ -1,5 +1,6 @@
 # 依赖与本地产物
 node_modules/
+__pycache__/
 .DS_Store
 Thumbs.db
 
