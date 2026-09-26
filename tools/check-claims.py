@@ -102,7 +102,10 @@ def last_modified(url):
     if not raw:
         return code, None
     try:
-        return code, parsedate_to_datetime(raw).date()
+        # Pages stamps UTC; the sitemap date is a local calendar date. Comparing the
+        # two raw makes every push before 08:00 local look a day ahead of itself.
+        dt = parsedate_to_datetime(raw)
+        return code, dt.astimezone().date() if dt.tzinfo else dt.date()
     except (TypeError, ValueError):
         return code, None
 
