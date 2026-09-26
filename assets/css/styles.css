@@ -11,7 +11,7 @@
   --space-3: #16202d;      /* 悬浮/高亮描边 */
   --ink: #dfe6ee;          /* 主文字 · 冷白 */
   --ink-dim: #8b96a6;      /* 次级文字 */
-  --ink-faint: #5d6878;    /* 弱文字/坐标 */
+  --ink-faint: #7a8798;    /* 弱文字/坐标 · 4.8:1 on card surface */
   --signal: #34f0a0;       /* 信号绿 · 唯一亮色 */
   --signal-dim: rgba(52, 240, 160, 0.18);
   --amber: #f2b24c;        /* 次级暖点缀(克制) */
@@ -415,7 +415,7 @@ a { color: inherit; text-decoration: none; }
   box-shadow: 0 0 14px var(--signal-dim);
 }
 .tl-meta { font-size: 12px; letter-spacing: 0.14em; color: var(--signal); margin-bottom: 8px; }
-.tl-item h4 { font-family: var(--display); font-size: 21px; font-weight: 600; margin-bottom: 8px; }
+.tl-item h3 { font-family: var(--display); font-size: 21px; font-weight: 600; margin-bottom: 8px; }
 .tl-item p { color: var(--ink-dim); font-size: 15px; max-width: 620px; }
 
 /* ==================== Signal (情怀) ==================== */
