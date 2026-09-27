@@ -40,10 +40,18 @@
   <meta name="theme-color" content="#07090d" />
   <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg" />
 
-  <!-- 字体：Space Grotesk + Noto Sans SC + JetBrains Mono -->
+  <!-- 首屏不阻塞：JS 在场时才把导航收成抽屉（无 JS 时窄屏仍给出完整链接列表） -->
+  <script>document.documentElement.className += ' js';</script>
+
+  <!-- 字体：Space Grotesk + Noto Sans SC + JetBrains Mono。
+       以 media=print 挂载，加载完再切回 all：字体拿不到时页面照常渲染，
+       而不是等一个境内长期不稳的同步请求。 -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+  <noscript>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet" />
+  </noscript>
 
   <!-- 样式 -->
   <link rel="stylesheet" href="assets/css/styles.css" />
@@ -214,7 +222,7 @@
         <span class="brand-glyph mono">&gt;_</span>
         <span class="brand-name">RevolutionLA</span>
       </a>
-      <ul class="nav-links">
+      <ul class="nav-links" id="nav-links">
         <li><a href="#about">ABOUT</a></li>
         <li><a href="#stack">STACK</a></li>
         <li><a href="#projects">WORK</a></li>
@@ -222,6 +230,12 @@
         <li><a href="#signal">SIGNAL</a></li>
         <li><a href="#contact">REACH</a></li>
       </ul>
+      <button class="nav-toggle mono" type="button"
+              aria-expanded="false" aria-controls="nav-links"
+              aria-label="打开导航菜单">
+        <span class="nt-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="nt-text">MENU</span>
+      </button>
       <a class="nav-cta mono" href="mailto:liuang0307@foxmail.com">EST. SIGNAL</a>
     </nav>
   </header>

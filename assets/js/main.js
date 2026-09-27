@@ -19,9 +19,21 @@
 
   function resizeCanvas() {
     if (!canvas) return;
-    w = canvas.width = window.innerWidth;
-    h = canvas.height = window.innerHeight;
+    // 位图按设备像素铺开、绘制坐标仍是 CSS 像素：否则 2x/3x 屏上每颗星
+    // 都被 CSS 拉伸放大一圈，星点糊成一团。上限 2 是无畏的开销——3x 与 2x
+    // 在这个密度下肉眼分不出，却多花一倍填充率。
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // clientWidth 而不是 innerWidth：canvas 是 position:fixed，它铺满的是
+    // 去掉滚动条后的视口（实测 375 vs 390），按 innerWidth 铺开会把星点横向挤掉 4%。
+    w = document.documentElement.clientWidth || window.innerWidth;
+    h = document.documentElement.clientHeight || window.innerHeight;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     initStars();
+    // 改 canvas.width 会清屏。动画分支下一帧自然补回来，静态分支没人补——
+    // 于是 reduced-motion 用户一旋转屏幕就只剩一片空黑。
+    if (reduced) paintStatic();
   }
 
   function initStars() {
@@ -41,6 +53,16 @@
   }
 
   var rafId = null;
+  function paintStatic() {
+    ctx.clearRect(0, 0, w, h);
+    for (var i = 0; i < stars.length; i++) {
+      ctx.beginPath();
+      ctx.arc(stars[i].x, stars[i].y, stars[i].r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(223,230,238,' + stars[i].baseOpacity.toFixed(3) + ')';
+      ctx.fill();
+    }
+  }
+
   function draw() {
     ctx.clearRect(0, 0, w, h);
     for (var i = 0; i < stars.length; i++) {
@@ -57,18 +79,11 @@
 
   if (canvas && ctx) {
     resizeCanvas();
-    initStars();
     if (!reduced) {
       draw();
     } else {
       // reduced motion: 只静态渲染一帧
-      ctx.clearRect(0, 0, w, h);
-      for (var i = 0; i < stars.length; i++) {
-        ctx.beginPath();
-        ctx.arc(stars[i].x, stars[i].y, stars[i].r, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(223,230,238,' + stars[i].baseOpacity.toFixed(3) + ')';
-        ctx.fill();
-      }
+      paintStatic();
     }
     var t;
     window.addEventListener('resize', function () {
@@ -126,5 +141,36 @@
       scrollTimer = setTimeout(updateActive, 60);
     }, { passive: true });
     updateActive();
+  }
+
+  // ---------- 窄屏抽屉导航 ----------
+  var header = document.querySelector('.site-header');
+  var toggle = document.querySelector('.nav-toggle');
+  var toggleText = toggle && toggle.querySelector('.nt-text');
+
+  function setNavOpen(open) {
+    header.classList.toggle('nav-open', open);
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    toggle.setAttribute('aria-label', (open ? '关闭' : '打开') + '导航菜单');
+    if (toggleText) toggleText.textContent = open ? 'CLOSE' : 'MENU';
+  }
+
+  if (toggle && header) {
+    toggle.addEventListener('click', function () {
+      setNavOpen(!header.classList.contains('nav-open'));
+    });
+    // 选完就收起：抽屉盖在正文上面，不收起的话点一次就等于挡住一次
+    navAnchors.forEach(function (a) {
+      a.addEventListener('click', function () { setNavOpen(false); });
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && header.classList.contains('nav-open')) {
+        setNavOpen(false);
+        toggle.focus();
+      }
+    });
+    window.addEventListener('resize', function () {
+      if (window.innerWidth > 760) setNavOpen(false);
+    });
   }
 })();

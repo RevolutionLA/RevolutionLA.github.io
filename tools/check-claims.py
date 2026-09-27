@@ -254,6 +254,31 @@ def contrast(fg, bg):
     return (hi + 0.05) / (lo + 0.05)
 
 
+def _media_block(css, cond):
+    """Return the body of the first @media block whose prelude contains `cond`.
+
+    Brace-counted rather than regexed: `[^}]*` stops at the first nested rule, so a
+    regex would report "the block does not hide .nav-links" for any block that has
+    one rule inside it - a check that passes by reading nothing.
+    """
+    i = css.find("@media")
+    while i >= 0:
+        j = css.index("{", i)
+        if cond in css[i:j]:
+            depth, k = 0, j
+            while k < len(css):
+                if css[k] == "{":
+                    depth += 1
+                elif css[k] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        return css[j + 1:k]
+                k += 1
+            return ""
+        i = css.find("@media", i + 6)
+    return None
+
+
 def check(root, offline=False):
     """Returns (findings, inconclusive)."""
     findings, unknown = [], []
@@ -423,6 +448,87 @@ def check(root, offline=False):
         bad("the page's '领先上游' claims disagree with each other: %s"
             % " / ".join(sorted(variants)))
 
+    # ---------- static: 窄屏导航必须真的能走通 ----------
+    # Four review rounds carried the same item: below 760px the main nav was
+    # `display: none` with nothing to replace it, so a phone visitor could only
+    # scroll. "Hidden" is fine; "hidden and unreachable" is the defect. This checks
+    # the reachable-path invariant, not the pixels: a future edit that re-hides the
+    # list behind an unconditional rule, or points the toggle at a stale id, fails.
+    mobile = _media_block(css, "max-width: 760px")
+    if mobile is None:
+        unk("no 'max-width: 760px' block in styles.css - the mobile-nav check has "
+            "nothing to read")
+    else:
+        nav_list = re.search(r'<ul class="nav-links"[^>]*id="([^"]+)"(.*?)</ul>',
+                             idx, re.S)
+        anchors = re.findall(r'href="#([^"]+)"', nav_list.group(2)) if nav_list else []
+        if not anchors:
+            bad("no in-page anchors found in ul.nav-links - the mobile-nav check has "
+                "gone blind again")
+        page_ids = set(re.findall(r'\bid="([^"]+)"', idx))
+        dangling = [a for a in anchors if a not in page_ids]
+        if dangling:
+            bad("nav links point at ids that are not on the page: %s"
+                % ", ".join("#" + a for a in dangling))
+        if not nav_list:
+            bad("ul.nav-links has no id - nothing can be wired to the section list")
+        else:
+            toggle = re.search(r'<button[^>]*aria-controls="%s"[^>]*>' % nav_list.group(1),
+                               idx)
+            if not toggle:
+                bad("no aria-controls=%s button: the section list is unreachable below "
+                    "760px" % nav_list.group(1))
+            elif 'aria-expanded' not in toggle.group(0):
+                bad("the nav toggle has no aria-expanded - a screen reader cannot tell "
+                    "whether the menu is open")
+        # Comments are prose, not selectors. Left in, a sentence that happens to
+        # mention `.js` or `display: none` flips the two verdicts below - which is
+        # exactly how this check first shipped, green and reading nothing.
+        rules = re.findall(r'([^{}]+)\{([^{}]*)\}', re.sub(r"/\*.*?\*/", "", mobile, flags=re.S))
+        hidden = [sel.strip() for sel, body in rules
+                  if re.search(r'\.nav-links\b', sel)
+                  and "display:none" in re.sub(r"\s+", "", body)]
+        ungated = [s for s in hidden if ".js" not in s]
+        if ungated:
+            bad("mobile nav hidden with no JS gate (%s): without script the section "
+                "links are simply gone" % " / ".join(ungated))
+        shown = [body for sel, body in rules
+                 if re.search(r'\.nav-toggle\b', sel)
+                 and "display:none" not in re.sub(r"\s+", "", body)]
+        if hidden and not shown:
+            bad("mobile CSS hides .nav-links but never shows .nav-toggle - the menu "
+                "has no way to open")
+        # The drawer is a two-file agreement: CSS keys off a class, JS toggles it.
+        # Rename it on one side only and every check above still passes while the
+        # menu quietly stops opening, so compare the tokens instead of trusting them.
+        js_ref = re.search(r'<script src="([^"]*main\.js)"', idx)
+        if not js_ref:
+            bad("index.html no longer loads a *main.js - the nav wiring is unchecked")
+        else:
+            js_path = os.path.join(root, js_ref.group(1).replace("/", os.sep))
+            if not os.path.exists(js_path):
+                bad("index.html loads %s which does not exist on disk" % js_ref.group(1))
+            else:
+                js = open(js_path, encoding="utf-8").read()
+                css_open_cls = re.findall(r"\.site-header(\.[\w-]+)\s+\.nav-links", mobile)
+                if not css_open_cls:
+                    bad("no '.site-header.<class> .nav-links' rule in the mobile block - "
+                        "the nav-open check has gone blind again")
+                for cls in dict.fromkeys(css_open_cls):
+                    # The CSS writes it as a selector (`.nav-open`), the JS as a class
+                    # name ('nav-open') - compare the name, not the dotted form.
+                    if cls[1:] not in js:
+                        bad("CSS opens the drawer on .%s but %s never toggles it - the "
+                            "menu cannot open" % (cls[1:], js_ref.group(1)))
+                # A drawer a screen reader can't see the state of, or a keyboard user
+                # can't get out of, is the same defect that hid the nav for four rounds.
+                if 'aria-expanded' not in js:
+                    bad("%s never updates aria-expanded - assistive tech reports the "
+                        "drawer as always closed" % js_ref.group(1))
+                if "key === 'Escape'" not in js:
+                    bad("%s has no Escape path - the drawer traps keyboard focus"
+                        % js_ref.group(1))
+
     # ---------- static: sitemap entries ----------
     sm_path = os.path.join(root, "sitemap.xml")
     sm_locs, sm_dates = [], []
@@ -562,8 +668,19 @@ def check(root, offline=False):
         if _is_transport(code):
             unk("cannot reach the compare API (%s): ahead-of-upstream claim unchecked" % code)
         elif code in THROTTLE or code in API_INCONCLUSIVE:
+            # GitHub says why in the body ("API rate limit exceeded for IP...", "You
+            # have exceeded a secondary rate limit"). Quoting that beats this script
+            # guessing "anonymous API limit" from the status code alone - and the first
+            # real 403 today was a secondary limit, which the guess would have misnamed.
+            why = THROTTLE.get(code)
+            if why is None:
+                try:
+                    why = json.loads(body.decode("utf-8", "replace")).get("message")
+                except ValueError:
+                    why = None
+                why = ("host said: " + why[:90]) if why else "no reason given"
             unk("HTTP %d for the compare API - %s; ahead-of-upstream claim unchecked, "
-                "re-run later" % (code, THROTTLE.get(code, "anonymous API limit")))
+                "re-run later" % (code, why))
         elif code != 200:
             bad("anonymous %s for %s (cannot verify the ahead-of-upstream claim as a "
                 "visitor)" % (code, CMP_URL))
@@ -642,6 +759,23 @@ CASES = [
     # sentence that appears only at the section note, so the card keeps saying 1400+
     ("领先上游 claims disagree", "index.html", "独立策展，领先上游 1400+",
      "独立策展，领先上游 1500+", "disagree with each other", None, "finding"),
+    # the mobile-nav invariant, proven able to fail: hide the list the way the page
+    # did for four review rounds and the checker must say so
+    ("mobile nav hidden with no toggle", "index.html",
+     'aria-controls="nav-links"', 'aria-controls="nowhere"',
+     "unreachable below 760px", None, "finding"),
+    ("mobile nav hidden ungated", "assets/css/styles.css",
+     "  .js .nav-links { display: none; }", "  .nav-links { display: none; }",
+     "no JS gate", None, "finding"),
+    ("nav link points at a missing section", "index.html",
+     '<li><a href="#journey">TRACE</a></li>', '<li><a href="#trombone">TRACE</a></li>',
+     "ids that are not on the page", None, "finding"),
+    ("drawer class renamed in CSS only", "assets/css/styles.css",
+     ".site-header.nav-open .nav-links", ".site-header.navopened .nav-links",
+     "never toggles it", None, "finding"),
+    ("drawer state never announced", "assets/js/main.js",
+     "    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');\n", "",
+     "never updates aria-expanded", None, "finding"),
     ("heading skip", "index.html",
      '<h3 class="pg-head mono"><span class="pg-label">AI · 音乐创作</span>'
      '<span class="pg-rule" aria-hidden="true"></span></h3>',
@@ -674,10 +808,13 @@ def probe(dep):
     if dep == "raw":
         return fetch(YUE_README)[0] == 200
     if dep == "api":
-        # Reachability of the host the claim is actually checked against. /rate_limit
-        # is used because it costs nothing against the anonymous budget and answers
-        # 200 without credentials; the verdict itself never comes from here.
-        return fetch("https://api.github.com/rate_limit")[0] == 200
+        # Ask the endpoint the verdict comes from, not a cheap neighbour. This first
+        # checked /rate_limit, which answers 200 while the compare call 403s on a
+        # secondary limit - so a throttled run reported the 3 cases as "checker is
+        # blind" instead of skipping them. Reachability of a different URL is not
+        # evidence about this one.
+        code, body = fetch(CMP_URL)
+        return code == 200 and b'"ahead_by"' in body
     if dep == "pages":
         return last_modified("https://revolutionla.github.io/")[0] == 200
     return True
@@ -798,10 +935,38 @@ def _unit_blocked_page_is_not_blindness():
     return None
 
 
-SITE_FILES = ("index.html", "assets/css/styles.css", "assets/img/og-image.png",
-              "sitemap.xml")
+def _unit_probe_asks_the_endpoint_that_matters():
+    """probe() must answer about the URL a verdict needs, not a healthy neighbour.
+
+    The first real 403 from the compare API landed on a run whose probe checked
+    /rate_limit - which answers 200 either way - so the three ahead-of-upstream
+    cases reported "the checker is blind" when the truth was "the host declined to
+    answer today". A green probe that cannot see the failure is worse than no probe.
+    """
+    global fetch
+    saved = fetch
+    scenarios = [
+        # (what the compare endpoint says, what /rate_limit says, what probe must say)
+        (403, b'{"message":"You have exceeded a secondary rate limit"}', 200, False),
+        (200, b'{"ahead_by":1433}', 200, True),
+        (200, b'{"message":"Not Found"}', 200, False),   # 200 but no value to compare
+    ]
+    try:
+        for cmp_code, cmp_body, rl_code, want in scenarios:
+            fetch = lambda url, retries=2, _c=(cmp_code, cmp_body), _r=rl_code: (
+                _c if url == CMP_URL else (_r, b"{}"))
+            got = probe("api")
+            if got != want:
+                return ("probe('api') said %r when the compare endpoint answered %d "
+                        "(rate_limit said %d) - it must report whether THIS verdict "
+                        "can be made" % (got, cmp_code, rl_code))
+    finally:
+        fetch = saved
+    return None
 
 
+SITE_FILES = ("index.html", "assets/css/styles.css", "assets/js/main.js",
+              "assets/img/og-image.png", "sitemap.xml")
 def _copy_site(src, dst):
     for rel in SITE_FILES:
         d = os.path.join(dst, rel)
@@ -854,6 +1019,8 @@ UNIT_CASES = [
     ("GitHub block page is not scraper blindness", _unit_blocked_page_is_not_blindness),
     ("throttling must yield 0 findings and a reason at every verdict site",
      _unit_throttle_is_not_a_dead_link),
+    ("probe asks the endpoint the verdict comes from",
+     _unit_probe_asks_the_endpoint_that_matters),
 ]
 
 
@@ -862,6 +1029,7 @@ def selftest(root):
     import tempfile
     rc = 0
     skipped = []
+    probes = {}          # dep -> reachable, answered once per run (see CASES loop)
     for label, fn in UNIT_CASES:
         err = fn()
         if err and err.startswith(SKIP):
@@ -874,10 +1042,16 @@ def selftest(root):
         else:
             print("selftest OK - %s" % label)
     for label, target, old, new, expect, dep, mode in CASES:
-        if dep and not probe(dep):
-            skipped.append("%s (%s host unreachable)" % (label, dep))
-            print("selftest [%s] SKIPPED - depends on unreachable host" % label)
-            continue
+        if dep:
+            # Memoised: the api probe fetches a 1.3 MB compare payload, and three
+            # cases ask the same question. Asking it three ways is thorough; paying
+            # for it three times is just a slower way to learn the host is throttled.
+            if dep not in probes:
+                probes[dep] = probe(dep)
+            if not probes[dep]:
+                skipped.append("%s (%s host unreachable)" % (label, dep))
+                print("selftest [%s] SKIPPED - depends on unreachable host" % label)
+                continue
         tmp = tempfile.mkdtemp(prefix="claims-selftest-")
         try:
             _copy_site(root, tmp)
@@ -909,8 +1083,15 @@ def selftest(root):
                 # anything - saying "blind to X" would send the reader to fix a
                 # checker that works. Misattribution is the failure this whole
                 # file exists to prevent, so it applies to its own output too.
+                # Markers name the verdict site that declined, not any old "unchecked":
+                # a loose substring would let a genuinely blind checker skip itself green.
                 throttled = [u for u in unknown
-                             if "throttled by the host" in u or "block/abuse page" in u]
+                             if any(mark in u for mark in
+                                    # Each marker names a verdict site that declined to
+                                    # answer, so a genuinely blind checker cannot skip
+                                    # itself green with an unrelated "unchecked".
+                                    ("throttled by the host", "block/abuse page",
+                                     "ahead-of-upstream claim unchecked"))]
                 if throttled:
                     skipped.append("%s (host throttled the run)" % label)
                     print("selftest [%s] SKIPPED - host throttled the run: %s"

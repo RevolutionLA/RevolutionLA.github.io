@@ -107,6 +107,26 @@ a { color: inherit; text-decoration: none; }
 .nav-cta:hover { border-color: var(--signal); color: var(--signal); box-shadow: 0 0 20px var(--signal-dim); }
 .nav-links { padding: 0; }
 
+/* 折叠开关：宽屏不出现，窄屏才登场（.js 之外的兜底见响应式段） */
+.nav-toggle {
+  display: none;
+  align-items: center;
+  gap: 9px;
+  background: none;
+  border: 1px solid var(--stroke-bright);
+  border-radius: 8px;
+  padding: 8px 13px;
+  color: var(--ink);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+}
+.nt-icon { display: inline-flex; flex-direction: column; gap: 3.5px; }
+.nt-icon i { display: block; width: 15px; height: 1.5px; background: currentColor; }
+.site-header.nav-open .nt-icon i:nth-child(1) { transform: translateY(5px) rotate(45deg); }
+.site-header.nav-open .nt-icon i:nth-child(2) { opacity: 0; }
+.site-header.nav-open .nt-icon i:nth-child(3) { transform: translateY(-5px) rotate(-45deg); }
+
 /* ==================== Hero ==================== */
 .hero {
   position: relative;
@@ -481,12 +501,37 @@ a:focus-visible, .btn:focus-visible {
 
 /* ==================== 响应式 ==================== */
 @media (max-width: 760px) {
-  .nav-links { display: none; }
+  .nav { height: 60px; }
+  /* 手指点的按钮：量出来 32px 高，够不上 44px 的触摸目标，只能靠纵向 padding 补 */
+  .nav-toggle { display: inline-flex; padding: 14px 13px; }
+  /* 抽屉是"收起"而不是"删掉"：没有 JS 的访客仍然看得见 6 个锚点，
+     所以隐藏这条挂在 .js 上，而不是无条件 display:none。 */
+  .js .nav-links { display: none; }
+  .js .site-header.nav-open .nav-links {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px 18px;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    padding: 12px 28px 18px;
+    background: rgba(7, 9, 13, 0.97);
+    border-bottom: 1px solid var(--stroke);
+  }
+  .js .site-header.nav-open .nav-links li { list-style: none; }
+  .js .site-header.nav-open .nav-links a {
+    display: block;
+    padding: 11px 2px;
+    font-size: 13px;
+    color: var(--ink);
+  }
   .section { --section-pad: 84px; }
   .about-grid { grid-template-columns: 1fr; gap: 44px; }
   .hero { padding: 40px 0 70px; }
   .contact-inner { padding: 40px 26px; }
   .projects-grid { grid-template-columns: 1fr; }
+  .nav-cta { padding: 7px 12px; }
 }
 
 /* 尊重减少动效偏好 */
