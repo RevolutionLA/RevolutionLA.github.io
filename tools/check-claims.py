@@ -47,6 +47,17 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UA = {"User-Agent": "Mozilla/5.0 (claims-check; link and claim verification)"}
 CURL = shutil.which("curl")
 YUE_README = "https://raw.githubusercontent.com/RevolutionLA/awesome-YuE/HEAD/README.md"
+# "领先上游 N+ 次提交" is measured against the fork's parent, the same way GitHub
+# renders it on the repo page. per_page=1 keeps the payload at ~1.3MB instead of 2.6MB;
+# this is the ONE api.github.com call the whole run makes, so the anonymous 60/hr
+# budget is not what decides whether the check works.
+CMP_URL = ("https://api.github.com/repos/awesome-dsh-plugin/awesome-dsh-plugin"
+           "/compare/main...RevolutionLA:awesome-dsh-plugin:main?per_page=1")
+UPSTREAM = "awesome-dsh-plugin/awesome-dsh-plugin"
+# A 403 from the anonymous API is GitHub's rate-limit answer, not a statement about
+# the number. (HTTPError gives us no body to read the reason from, so the status is
+# all we get, and it cannot be allowed to become a finding.)
+API_INCONCLUSIVE = (403,)
 # GitHub answers anonymous bursts with HTTP 200 + one of these interstitials.
 BLOCK_MARKERS = (b"whoa there", b"abuse detection", b"you have been blocked",
                  b"rate limit exceeded")
@@ -65,6 +76,7 @@ THROTTLE_SITES = (
     ("star badges", ("anonymously (429)", "badge for")),
     ("awesome-YuE README claim", ("HTTP 429", "'收录' claim unchecked")),
     ("sitemap lastmod", ("HTTP 429", "lastmod")),
+    ("ahead-of-upstream commit count", ("HTTP 429", "ahead-of-upstream claim unchecked")),
 )
 _STATUS_LINE = re.compile(rb"HTTP/[\d.]+ \d{3}")
 
@@ -397,6 +409,20 @@ def check(root, offline=False):
     if not claims:
         bad("no '收录 N 个' claim found - the claim check has gone blind again")
 
+    # "领先上游 N+ 次提交" - the page says it twice about the same fork, so the pair can
+    # contradict itself without either number being wrong against GitHub. Half-updated
+    # digits are this repo's recurring rot (187★ shipped stale, 4★ drifted unnoticed),
+    # so self-consistency is checked here, offline, and the value is checked below.
+    ahead_claims = [(int(m.group(1)), m.group(0))
+                    for m in re.finditer(r"领先上游\s*(\d+)\+\s*次提交", idx)]
+    if not ahead_claims:
+        bad("no '领先上游 N+ 次提交' claim found - the ahead-of-upstream check has gone "
+            "blind again")
+    variants = {text for _, text in ahead_claims}
+    if len(variants) > 1:
+        bad("the page's '领先上游' claims disagree with each other: %s"
+            % " / ".join(sorted(variants)))
+
     # ---------- static: sitemap entries ----------
     sm_path = os.path.join(root, "sitemap.xml")
     sm_locs, sm_dates = [], []
@@ -529,6 +555,37 @@ def check(root, offline=False):
                 if not ok:
                     bad("claim '%s' vs %d unique repo links in awesome-YuE README" % (text, n))
 
+    # ---------- network: "领先上游 N+ 次提交" vs GitHub's own ahead_by ----------
+    for base_n, text in dict.fromkeys(ahead_claims):
+        code, body = fetch(CMP_URL)
+        time.sleep(0.3)
+        if _is_transport(code):
+            unk("cannot reach the compare API (%s): ahead-of-upstream claim unchecked" % code)
+        elif code in THROTTLE or code in API_INCONCLUSIVE:
+            unk("HTTP %d for the compare API - %s; ahead-of-upstream claim unchecked, "
+                "re-run later" % (code, THROTTLE.get(code, "anonymous API limit")))
+        elif code != 200:
+            bad("anonymous %s for %s (cannot verify the ahead-of-upstream claim as a "
+                "visitor)" % (code, CMP_URL))
+        else:
+            try:
+                ahead = json.loads(body.decode("utf-8", "replace")).get("ahead_by")
+            except ValueError:
+                ahead = None
+            if ahead is None:
+                # 200 but unreadable is this script breaking, not the page lying - the
+                # digits on the page just stopped being watched.
+                bad("compare API answered 200 with no readable 'ahead_by' - the page's "
+                    "'%s' is now unwatched" % text)
+            elif ahead < base_n:
+                bad("claim '%s' vs %d commits ahead of %s" % (text, ahead, UPSTREAM))
+            elif ahead >= base_n + 200:
+                # Not false, but the gap is widening in the direction no one reads as a
+                # lie - "1400+" stays true at 2000, and a lower bound nobody refreshes
+                # is how a page quietly stops describing the repo it links to.
+                unk("claim '%s' is true but understated: GitHub reports %d ahead of %s"
+                    % (text, ahead, UPSTREAM))
+
     return findings, unknown
 
 
@@ -577,6 +634,14 @@ CASES = [
      "no repo in ItemList sameAs", None, "finding"),
     ("false 收录 claim", "index.html", "收录近 70 个", "收录近 900 个", "claim '", "raw", "finding"),
     ("收录 claim removed", "index.html", "收录近 70 个", "收录一批", "gone blind", None, "finding"),
+    ("false 领先上游 claim", "index.html", "领先上游 1400+", "领先上游 9000+",
+     "commits ahead of", "api", "finding"),
+    ("领先上游 claim removed", "index.html", "领先上游 1400+ 次提交", "领先上游较多提交",
+     "gone blind", None, "finding"),
+    # the two occurrences on the page must not drift apart - this anchor is the one
+    # sentence that appears only at the section note, so the card keeps saying 1400+
+    ("领先上游 claims disagree", "index.html", "独立策展，领先上游 1400+",
+     "独立策展，领先上游 1500+", "disagree with each other", None, "finding"),
     ("heading skip", "index.html",
      '<h3 class="pg-head mono"><span class="pg-label">AI · 音乐创作</span>'
      '<span class="pg-rule" aria-hidden="true"></span></h3>',
@@ -608,6 +673,11 @@ def probe(dep):
         return fetch("https://github.com/RevolutionLA/adversarial-review")[0] == 200
     if dep == "raw":
         return fetch(YUE_README)[0] == 200
+    if dep == "api":
+        # Reachability of the host the claim is actually checked against. /rate_limit
+        # is used because it costs nothing against the anonymous budget and answers
+        # 200 without credentials; the verdict itself never comes from here.
+        return fetch("https://api.github.com/rate_limit")[0] == 200
     if dep == "pages":
         return last_modified("https://revolutionla.github.io/")[0] == 200
     return True
