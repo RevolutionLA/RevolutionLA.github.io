@@ -82,12 +82,19 @@ _STATUS_LINE = re.compile(rb"HTTP/[\d.]+ \d{3}")
 
 
 def _get(url, timeout=25):
+    # UA sets Accept-Encoding: identity, so every path below is plain bytes.
     req = urllib.request.Request(url, headers=dict(UA))
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, r.read()
     except urllib.error.HTTPError as e:
-        return e.code, b""
+        # An HTTPError is also the response object: GitHub's 403 carries
+        # {"message":"API rate limit exceeded..."} and without this the
+        # checker can only say "no reason given" about a host answer it held.
+        try:
+            return e.code, e.read()
+        except Exception:
+            return e.code, b""
     except Exception as e:
         return "err:%s" % (e.reason if isinstance(e, urllib.error.URLError)
                            else type(e).__name__), b""
@@ -915,6 +922,51 @@ def _raise_reset(*a, **k):
     raise urllib.error.URLError("simulated proxy reset")
 
 
+def _unit_httperror_body_survives():
+    """Regression for the message the checker shows when GitHub throttles us.
+
+    An HTTPError IS the response. Dropping its body is why a 403 could only be
+    reported as "no reason given" while the host had said "API rate limit
+    exceeded" - and an inconclusive verdict has to name the reason it is one.
+    """
+    import io
+    saved = urllib.request.urlopen
+    body = b'{"message":"API rate limit exceeded for 1.2.3.4."}'
+    state = {"readable": True}
+
+    class Dead(object):
+        def read(self):
+            raise OSError("connection reset mid-body")
+
+        def close(self):
+            pass
+
+    def fake(req, timeout=None):
+        raise urllib.error.HTTPError("https://api.github.com/x", 403, "Forbidden",
+                                     {"content-type": "application/json"},
+                                     io.BytesIO(body) if state["readable"] else Dead())
+
+    try:
+        urllib.request.urlopen = fake
+        code, got = fetch("https://api.github.com/x")
+        if code != 403:
+            return "HTTPError path lost the status: %r" % (code,)
+        if b"rate limit" not in got:
+            return "HTTPError path threw away the body the host sent (%r) - " \
+                   "the verdict would have to say 'no reason given'" % (got,)
+
+        # An error response whose body cannot be read must still report the status
+        # it saw; losing the status too would turn this into a transport error and
+        # a dead link would be excused for a reason the host never gave.
+        state["readable"] = False
+        code2, got2 = fetch("https://api.github.com/x")
+        if code2 != 403 or got2:
+            return "unreadable error body turned into (%r, %r) instead of (403, b'')" % (code2, got2)
+    finally:
+        urllib.request.urlopen = saved
+    return None
+
+
 def _unit_blocked_page_is_not_blindness():
     """Deterministic P2-4 regression: GitHub's 200 abuse interstitial must read as
     'the environment is throttling us', not as 'the scraper broke'."""
@@ -1017,6 +1069,7 @@ UNIT_CASES = [
     ("star parser blindness is not 'ok'", _unit_star_parser_blindness),
     ("curl HEAD reports the status it saw, not 200", _unit_head_status_is_observed),
     ("GitHub block page is not scraper blindness", _unit_blocked_page_is_not_blindness),
+    ("HTTPError keeps the body that explains the verdict", _unit_httperror_body_survives),
     ("throttling must yield 0 findings and a reason at every verdict site",
      _unit_throttle_is_not_a_dead_link),
     ("probe asks the endpoint the verdict comes from",
