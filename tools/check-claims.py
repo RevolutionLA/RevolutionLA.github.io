@@ -47,17 +47,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UA = {"User-Agent": "Mozilla/5.0 (claims-check; link and claim verification)"}
 CURL = shutil.which("curl")
 YUE_README = "https://raw.githubusercontent.com/RevolutionLA/awesome-YuE/HEAD/README.md"
-# "领先上游 N+ 次提交" is measured against the fork's parent, the same way GitHub
-# renders it on the repo page. per_page=1 keeps the payload at ~1.3MB instead of 2.6MB;
-# this is the ONE api.github.com call the whole run makes, so the anonymous 60/hr
-# budget is not what decides whether the check works.
-CMP_URL = ("https://api.github.com/repos/awesome-dsh-plugin/awesome-dsh-plugin"
-           "/compare/main...RevolutionLA:awesome-dsh-plugin:main?per_page=1")
-UPSTREAM = "awesome-dsh-plugin/awesome-dsh-plugin"
-# A 403 from the anonymous API is GitHub's rate-limit answer, not a statement about
-# the number. (HTTPError gives us no body to read the reason from, so the status is
-# all we get, and it cannot be allowed to become a finding.)
-API_INCONCLUSIVE = (403,)
 # GitHub answers anonymous bursts with HTTP 200 + one of these interstitials.
 BLOCK_MARKERS = (b"whoa there", b"abuse detection", b"you have been blocked",
                  b"rate limit exceeded")
@@ -76,7 +65,6 @@ THROTTLE_SITES = (
     ("star badges", ("anonymously (429)", "badge for")),
     ("awesome-YuE README claim", ("HTTP 429", "'收录' claim unchecked")),
     ("sitemap lastmod", ("HTTP 429", "lastmod")),
-    ("ahead-of-upstream commit count", ("HTTP 429", "ahead-of-upstream claim unchecked")),
 )
 _STATUS_LINE = re.compile(rb"HTTP/[\d.]+ \d{3}")
 
@@ -441,20 +429,6 @@ def check(root, offline=False):
     if not claims:
         bad("no '收录 N 个' claim found - the claim check has gone blind again")
 
-    # "领先上游 N+ 次提交" - the page says it twice about the same fork, so the pair can
-    # contradict itself without either number being wrong against GitHub. Half-updated
-    # digits are this repo's recurring rot (187★ shipped stale, 4★ drifted unnoticed),
-    # so self-consistency is checked here, offline, and the value is checked below.
-    ahead_claims = [(int(m.group(1)), m.group(0))
-                    for m in re.finditer(r"领先上游\s*(\d+)\+\s*次提交", idx)]
-    if not ahead_claims:
-        bad("no '领先上游 N+ 次提交' claim found - the ahead-of-upstream check has gone "
-            "blind again")
-    variants = {text for _, text in ahead_claims}
-    if len(variants) > 1:
-        bad("the page's '领先上游' claims disagree with each other: %s"
-            % " / ".join(sorted(variants)))
-
     # ---------- static: 窄屏导航必须真的能走通 ----------
     # Four review rounds carried the same item: below 760px the main nav was
     # `display: none` with nothing to replace it, so a phone visitor could only
@@ -668,48 +642,6 @@ def check(root, offline=False):
                 if not ok:
                     bad("claim '%s' vs %d unique repo links in awesome-YuE README" % (text, n))
 
-    # ---------- network: "领先上游 N+ 次提交" vs GitHub's own ahead_by ----------
-    for base_n, text in dict.fromkeys(ahead_claims):
-        code, body = fetch(CMP_URL)
-        time.sleep(0.3)
-        if _is_transport(code):
-            unk("cannot reach the compare API (%s): ahead-of-upstream claim unchecked" % code)
-        elif code in THROTTLE or code in API_INCONCLUSIVE:
-            # GitHub says why in the body ("API rate limit exceeded for IP...", "You
-            # have exceeded a secondary rate limit"). Quoting that beats this script
-            # guessing "anonymous API limit" from the status code alone - and the first
-            # real 403 today was a secondary limit, which the guess would have misnamed.
-            why = THROTTLE.get(code)
-            if why is None:
-                try:
-                    why = json.loads(body.decode("utf-8", "replace")).get("message")
-                except ValueError:
-                    why = None
-                why = ("host said: " + why[:90]) if why else "no reason given"
-            unk("HTTP %d for the compare API - %s; ahead-of-upstream claim unchecked, "
-                "re-run later" % (code, why))
-        elif code != 200:
-            bad("anonymous %s for %s (cannot verify the ahead-of-upstream claim as a "
-                "visitor)" % (code, CMP_URL))
-        else:
-            try:
-                ahead = json.loads(body.decode("utf-8", "replace")).get("ahead_by")
-            except ValueError:
-                ahead = None
-            if ahead is None:
-                # 200 but unreadable is this script breaking, not the page lying - the
-                # digits on the page just stopped being watched.
-                bad("compare API answered 200 with no readable 'ahead_by' - the page's "
-                    "'%s' is now unwatched" % text)
-            elif ahead < base_n:
-                bad("claim '%s' vs %d commits ahead of %s" % (text, ahead, UPSTREAM))
-            elif ahead >= base_n + 200:
-                # Not false, but the gap is widening in the direction no one reads as a
-                # lie - "1400+" stays true at 2000, and a lower bound nobody refreshes
-                # is how a page quietly stops describing the repo it links to.
-                unk("claim '%s' is true but understated: GitHub reports %d ahead of %s"
-                    % (text, ahead, UPSTREAM))
-
     return findings, unknown
 
 
@@ -758,14 +690,6 @@ CASES = [
      "no repo in ItemList sameAs", None, "finding"),
     ("false 收录 claim", "index.html", "收录近 70 个", "收录近 900 个", "claim '", "raw", "finding"),
     ("收录 claim removed", "index.html", "收录近 70 个", "收录一批", "gone blind", None, "finding"),
-    ("false 领先上游 claim", "index.html", "领先上游 1400+", "领先上游 9000+",
-     "commits ahead of", "api", "finding"),
-    ("领先上游 claim removed", "index.html", "领先上游 1400+ 次提交", "领先上游较多提交",
-     "gone blind", None, "finding"),
-    # the two occurrences on the page must not drift apart - this anchor is the one
-    # sentence that appears only at the section note, so the card keeps saying 1400+
-    ("领先上游 claims disagree", "index.html", "独立策展，领先上游 1400+",
-     "独立策展，领先上游 1500+", "disagree with each other", None, "finding"),
     # the mobile-nav invariant, proven able to fail: hide the list the way the page
     # did for four review rounds and the checker must say so
     ("mobile nav hidden with no toggle", "index.html",
@@ -814,14 +738,6 @@ def probe(dep):
         return fetch("https://github.com/RevolutionLA/adversarial-review")[0] == 200
     if dep == "raw":
         return fetch(YUE_README)[0] == 200
-    if dep == "api":
-        # Ask the endpoint the verdict comes from, not a cheap neighbour. This first
-        # checked /rate_limit, which answers 200 while the compare call 403s on a
-        # secondary limit - so a throttled run reported the 3 cases as "checker is
-        # blind" instead of skipping them. Reachability of a different URL is not
-        # evidence about this one.
-        code, body = fetch(CMP_URL)
-        return code == 200 and b'"ahead_by"' in body
     if dep == "pages":
         return last_modified("https://revolutionla.github.io/")[0] == 200
     return True
@@ -990,28 +906,26 @@ def _unit_blocked_page_is_not_blindness():
 def _unit_probe_asks_the_endpoint_that_matters():
     """probe() must answer about the URL a verdict needs, not a healthy neighbour.
 
-    The first real 403 from the compare API landed on a run whose probe checked
-    /rate_limit - which answers 200 either way - so the three ahead-of-upstream
-    cases reported "the checker is blind" when the truth was "the host declined to
-    answer today". A green probe that cannot see the failure is worse than no probe.
+    This first existed for the compare API, whose probe checked /rate_limit - a URL
+    that answers 200 while the call the verdict depends on 403s. That made a
+    throttled run accuse the checker of going blind when the truth was "the host
+    declined to answer today". Same lesson, applied to the probes that remain:
+    reachability of some other host is not evidence about this one.
     """
     global fetch
     saved = fetch
-    scenarios = [
-        # (what the compare endpoint says, what /rate_limit says, what probe must say)
-        (403, b'{"message":"You have exceeded a secondary rate limit"}', 200, False),
-        (200, b'{"ahead_by":1433}', 200, True),
-        (200, b'{"message":"Not Found"}', 200, False),   # 200 but no value to compare
-    ]
+    deps = {"github": "https://github.com/RevolutionLA/adversarial-review",
+            "raw": YUE_README}
     try:
-        for cmp_code, cmp_body, rl_code, want in scenarios:
-            fetch = lambda url, retries=2, _c=(cmp_code, cmp_body), _r=rl_code: (
-                _c if url == CMP_URL else (_r, b"{}"))
-            got = probe("api")
-            if got != want:
-                return ("probe('api') said %r when the compare endpoint answered %d "
-                        "(rate_limit said %d) - it must report whether THIS verdict "
-                        "can be made" % (got, cmp_code, rl_code))
+        for dep, url in deps.items():
+            for code, want in ((200, True), (403, False), (429, False)):
+                fetch = lambda u, retries=2, _u=url, _c=code: (
+                    (_c, b"") if u == _u else (200, b""))
+                got = probe(dep)
+                if got != want:
+                    return ("probe(%r) said %r while %s answered %d and every other URL "
+                            "answered 200 - a green probe that cannot see this failure is "
+                            "worse than no probe" % (dep, got, url, code))
     finally:
         fetch = saved
     return None
@@ -1096,9 +1010,9 @@ def selftest(root):
             print("selftest OK - %s" % label)
     for label, target, old, new, expect, dep, mode in CASES:
         if dep:
-            # Memoised: the api probe fetches a 1.3 MB compare payload, and three
-            # cases ask the same question. Asking it three ways is thorough; paying
-            # for it three times is just a slower way to learn the host is throttled.
+            # Memoised: several cases ask about the same host, and a throttled host
+            # answers identically to all of them. Asking three ways is thorough; paying
+            # three round trips is just a slower way to learn it declined today.
             if dep not in probes:
                 probes[dep] = probe(dep)
             if not probes[dep]:
@@ -1143,8 +1057,7 @@ def selftest(root):
                                     # Each marker names a verdict site that declined to
                                     # answer, so a genuinely blind checker cannot skip
                                     # itself green with an unrelated "unchecked".
-                                    ("throttled by the host", "block/abuse page",
-                                     "ahead-of-upstream claim unchecked"))]
+                                    ("throttled by the host", "block/abuse page"))]
                 if throttled:
                     skipped.append("%s (host throttled the run)" % label)
                     print("selftest [%s] SKIPPED - host throttled the run: %s"
