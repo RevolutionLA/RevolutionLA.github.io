@@ -57,6 +57,15 @@ BLOCK_MARKERS = (b"whoa there", b"abuse detection", b"you have been blocked",
 THROTTLE = {429: "throttled by the host (too many anonymous requests)",
             502: "bad gateway - proxy/gateway upstream, not the page",
             503: "temporarily unavailable - host-side, not the page"}
+# Every place a network status turns into a verdict, and the phrase only the THROTTLE
+# branch can emit. The selftest asserts each one speaks up; a branch that forgets to
+# classify the throttle then fails a test instead of shipping a false finding.
+THROTTLE_SITES = (
+    ("link check", ("HTTP 429", "link unverified")),
+    ("star badges", ("anonymously (429)", "badge for")),
+    ("awesome-YuE README claim", ("HTTP 429", "'收录' claim unchecked")),
+    ("sitemap lastmod", ("HTTP 429", "lastmod")),
+)
 _STATUS_LINE = re.compile(rb"HTTP/[\d.]+ \d{3}")
 
 
@@ -462,6 +471,12 @@ def check(root, offline=False):
         time.sleep(0.2)
         if _is_transport(code):
             unk("cannot read Last-Modified for %s (%s)" % (loc, code))
+        elif code in THROTTLE:
+            # Review P3: without this the run says "no Last-Modified header", blaming
+            # the page for a header we were throttled out of reading. Same wrong
+            # attribution as the 429-as-dead-link family, one branch over.
+            unk("HTTP %d for %s - %s; lastmod %s unverified, re-run later"
+                % (code, loc, THROTTLE[code], declared_s))
         elif live is None:
             unk("no Last-Modified header for %s; lastmod %s unverified" % (loc, declared_s))
         elif abs((declared - live).days) > 1:
@@ -497,6 +512,9 @@ def check(root, offline=False):
         code, readme = fetch(YUE_README)
         if _is_transport(code):
             unk("cannot fetch awesome-YuE README (%s): '收录' claim unchecked" % code)
+        elif code in THROTTLE:
+            unk("HTTP %d for %s - %s; '收录' claim unchecked, re-run later"
+                % (code, YUE_README, THROTTLE[code]))
         elif code != 200:
             bad("anonymous %s for %s" % (code, YUE_README))
         else:
@@ -724,11 +742,11 @@ def _copy_site(src, dst):
 
 def _unit_throttle_is_not_a_dead_link():
     """Deterministic reverse case: 429 / 502 / 503 are the server reacting to OUR burst
-    (this loop makes a dozen requests), not evidence about the page. Filing them as
-    'visitors cannot reach it' is the P0-B mistake with a different number in it.
+    (this loop makes a dozen requests), not evidence about the page. Under a full-host
+    throttle the checker must emit ZERO findings and a reason at every verdict site.
 
     Stubbed so it runs with no network at all, and it asserts the direction that a
-    mutation case cannot: the checker must STAY SILENT about the URL.
+    mutation case cannot: the checker must STAY SILENT about the URLs.
     """
     import tempfile
     tmp = tempfile.mkdtemp(prefix="claims-throttle-")
@@ -737,19 +755,24 @@ def _unit_throttle_is_not_a_dead_link():
     try:
         _copy_site(ROOT, tmp)
         fetch = lambda url, retries=2: (429, b"")
-        _head_headers = lambda url, timeout=25: ("err:simulated-off", None)
+        _head_headers = lambda url, timeout=25: (429, {"retry-after": "60"})
         found, unknown = check(tmp, offline=False)
     finally:
         fetch, _head_headers = saved_fetch, saved_head
         shutil.rmtree(tmp, ignore_errors=True)
-    accused = [f for f in found if "cannot reach" in f]
-    if accused:
-        return "a 429 was reported as a dead link: %r" % (accused[0],)
-    hedged = [u for u in unknown if "throttled by the host" in u]
-    if not hedged:
-        return "no inconclusive mentioned the throttle; the 429 was swallowed silently: %r" % (unknown,)
-    if not [u for u in unknown if "badge for" in u or "unchecked" in u]:
-        return "star badges under a 429 produced no 'unchecked' inconclusive: %r" % (unknown,)
+    # Assert on the WHOLE verdict set, not on the wording of the one branch I happened
+    # to think of. Round-4 review: this case checked `found` for the substring
+    # "cannot reach", which the README branch never emits - a real false finding slipped
+    # through and the case stayed green. A throttle must not produce ANY finding.
+    if found:
+        return "a 429 produced %d finding(s), expected 0: %r" % (len(found), found[0])
+    # And every network verdict site must say so out loud: a branch that swallows the
+    # throttle would look identical to one that handled it.
+    missing = [site for site, marker in THROTTLE_SITES
+               if not [u for u in unknown if all(m in u for m in marker)]]
+    if missing:
+        return "no inconclusive accounted for the throttle at: %s (the branch is silent " \
+               "or unclassified): %r" % (", ".join(missing), unknown[:4])
     return None
 
 
@@ -759,7 +782,7 @@ UNIT_CASES = [
     ("star parser blindness is not 'ok'", _unit_star_parser_blindness),
     ("curl HEAD reports the status it saw, not 200", _unit_head_status_is_observed),
     ("GitHub block page is not scraper blindness", _unit_blocked_page_is_not_blindness),
-    ("HTTP 429 must not read as a dead link (refused to accuse)",
+    ("throttling must yield 0 findings and a reason at every verdict site",
      _unit_throttle_is_not_a_dead_link),
 ]
 
