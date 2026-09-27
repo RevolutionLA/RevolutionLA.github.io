@@ -22,6 +22,10 @@ Design rules this file lives by:
   200 is a finding — the watcher broke, and the digits on the page are now unwatched.
 - Anything that is not an integer HTTP status is transport, never a verdict. curl
   prints 000 when it could not connect; read as HTTP 0 that became a false dead link.
+  The mirror of that bug is a fallback that *invents* an integer (a HEAD path that
+  ended in `return 200` while curl was describing a 404) — an observed-looking status
+  nobody observed. Every curl payload, GET or HEAD, is parsed by the one function
+  `_curl_raw`, so there is no second place to get this wrong.
 - `--selftest` mutates a copy and asserts the checker reports it. A check that cannot
   fail is not a check; a selftest that SKIPS cases must not report success either.
 """
@@ -43,6 +47,17 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UA = {"User-Agent": "Mozilla/5.0 (claims-check; link and claim verification)"}
 CURL = shutil.which("curl")
 YUE_README = "https://raw.githubusercontent.com/RevolutionLA/awesome-YuE/HEAD/README.md"
+# GitHub answers anonymous bursts with HTTP 200 + one of these interstitials.
+BLOCK_MARKERS = (b"whoa there", b"abuse detection", b"you have been blocked",
+                 b"rate limit exceeded")
+# Statuses that mean "the server is reacting to US asking", not "this page is dead".
+# 429 is GitHub throttling a burst; 502/503 are what this machine's proxy answers when
+# its tunnel gives up (it did so repeatedly during these reviews). Reporting any of
+# them as "visitors cannot reach it" is the P0-B mistake with a different number in it.
+THROTTLE = {429: "throttled by the host (too many anonymous requests)",
+            502: "bad gateway - proxy/gateway upstream, not the page",
+            503: "temporarily unavailable - host-side, not the page"}
+_STATUS_LINE = re.compile(rb"HTTP/[\d.]+ \d{3}")
 
 
 def _get(url, timeout=25):
@@ -57,14 +72,21 @@ def _get(url, timeout=25):
                            else type(e).__name__), b""
 
 
-def _curl_get(url, timeout=25):
-    """curl follows redirects and survives the resets this machine's proxy throws
-    at python-urllib."""
+def _curl_raw(extra, url, timeout=25):
+    """The ONE place curl's stdout gets parsed into (status, payload).
+
+    Review P1-新: a second, HEAD-specific copy of this parsing ended in
+    `return 200, heads` without ever reading a status line - curl exits 0 for 404
+    pages, so the fallback minted a healthy 200 for a dead URL. Same bug family as
+    P0-B, mirrored: that one turned "no observation" into an accusation, this one
+    turned a real 404 into a clean bill of health. One pattern, one parser.
+    """
     if not CURL:
         return None, b""
     try:
         p = subprocess.run(
-            [CURL, "-sS", "-L", "-w", "\n%{http_code}", "--max-time", str(timeout), url],
+            [CURL, "-sS", "-L", "-w", "\n%{http_code}", "--max-time", str(timeout)]
+            + extra + [url],
             capture_output=True, timeout=timeout + 5)
     except Exception as e:
         return "err:curl-%s" % type(e).__name__, b""
@@ -76,12 +98,39 @@ def _curl_get(url, timeout=25):
     i = out.rfind(b"\n")
     if i < 0:
         return "err:curl-no-status", b""
-    code, body = out[i + 1:].strip(), out[:i]
+    code, blob = out[i + 1:].strip(), out[:i]
     if not code.isdigit() or int(code) == 0:
         # curl prints 000 for "no HTTP response at all" even with exit status 0;
         # int("000") == 0 would otherwise reach the link check and read as a dead link.
-        return "err:curl-code-%s" % code.decode("ascii", "replace"), body
-    return int(code), body
+        return "err:curl-code-%s" % code.decode("ascii", "replace"), blob
+    return int(code), blob
+
+
+def _curl_get(url, timeout=25):
+    """curl follows redirects and survives the resets this machine's proxy throws
+    at python-urllib."""
+    return _curl_raw([], url, timeout)
+
+
+def _curl_head(url, timeout=25):
+    """HEAD via curl: the status comes from the same parser as everything else,
+    so a 404 can never arrive wearing a 200."""
+    code, blob = _curl_raw(["-I"], url, timeout)
+    if _is_transport(code):
+        return code, None
+    heads = {}
+    for line in blob.split(b"\n"):
+        if _STATUS_LINE.match(line.strip()):
+            # -L dumps every hop: a Last-Modified carried from a redirect we did not
+            # settle on would vouch for a date this URL never reported. Match is
+            # start-anchored because HTTP/1.1 appends a reason phrase.
+            heads = {}
+            continue
+        k, sep, v = line.partition(b":")
+        if sep and k.strip():
+            heads[k.strip().lower().decode("ascii", "replace")] = v.strip().decode(
+                "ascii", "replace")
+    return code, heads
 
 
 def fetch(url, retries=2):
@@ -121,9 +170,16 @@ def _parse_lm(raw):
 
 def _head_headers(url, timeout=25):
     """HEAD with urllib, falling back to curl -I: this machine's proxy resets urllib
-    on its own, and five 'lastmod unverified' lines are not a pass (review P1-C)."""
+    on its own, and five 'lastmod unverified' lines are not a pass (review P1-C).
+
+    The fallback must not invent a status. Review P1-新: it used to parse the header
+    dump itself and end in `return 200, heads`, and `curl -sSIL` exits 0 for a 404
+    page - so every URL this branch ever saw was reported healthy. That is the worst
+    kind of value for this script to produce: an integer status that was never
+    observed. It now defers to _curl_head, which parses %{http_code} like every
+    other curl call.
+    """
     req = urllib.request.Request(url, headers=dict(UA), method="HEAD")
-    code = None
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, r.headers
@@ -134,32 +190,17 @@ def _head_headers(url, timeout=25):
                             else type(e).__name__)
     if not CURL:
         return code, None
-    try:
-        p = subprocess.run([CURL, "-sSIL", "--max-time", str(timeout), url],
-                           capture_output=True, timeout=timeout + 5)
-    except Exception as e:
-        return "err:curl-%s" % type(e).__name__, None
-    if p.returncode != 0:
-        return "err:curl-exit-%d" % p.returncode, None
-    heads = {}
-    for line in p.stdout.split(b"\n"):
-        k, sep, v = line.partition(b":")
-        if sep and k.strip():
-            heads[k.strip().lower().decode("ascii", "replace")] = v.strip().decode(
-                "ascii", "replace")
-    return 200, heads
+    return _curl_head(url, timeout)
 
 
 def last_modified(url):
     """Pages' own Last-Modified header - the only date a deployed page can vouch for.
-    Returns (code, date_or_None)."""
+    Returns (code, date_or_None). urllib gives a Message (its .get() is already
+    case-insensitive), _curl_head gives a dict keyed in lowercase; one lookup fits both."""
     code, headers = _head_headers(url)
     if _is_transport(code) or headers is None:
         return code, None
-    raw = headers.get("last-modified")
-    if raw is None and not isinstance(headers, dict):
-        raw = headers.get("Last-Modified")
-    return code, _parse_lm(raw)
+    return code, _parse_lm(headers.get("last-modified"))
 
 
 def png_size(path):
@@ -400,6 +441,12 @@ def check(root, offline=False):
         time.sleep(0.3)  # github resets bursts of connections
         if _is_transport(code):
             unk("transport %s for %s (not a verdict)" % (code, u))
+        elif code in THROTTLE:
+            # The server is complaining about US, not about the link. Calling a 429
+            # "visitors cannot reach it" is the same mistake as calling a proxy reset
+            # one - and it fires in bursts, because this loop makes a dozen requests.
+            unk("HTTP %d for %s - %s; link unverified, re-run later"
+                % (code, u, THROTTLE[code]))
         elif code != 200:
             bad("anonymous %s for %s (visitors cannot reach it)" % (code, u))
 
@@ -428,7 +475,12 @@ def check(root, offline=False):
     for name, (owner, r), claimed in star_claims:
         code, n, state = stars_of(owner, r)
         time.sleep(0.3)
-        if state == "unparsed":
+        if state == "blocked":
+            # Environment, not the page and not the scraper: say which, or the reader
+            # goes to fix markup that never changed (review P2-4).
+            unk("github answered 200 with a block/abuse page for %s/%s - anonymous rate "
+                "limit, badge for '%s' unchecked; re-run later" % (owner, r, name))
+        elif state == "unparsed":
             # The page answered, we just can no longer read the number out of it.
             # That is this script breaking, not the environment - and those digits on
             # the page are now unwatched, which is exactly how 187 reached production.
@@ -469,12 +521,21 @@ def stars_of(owner, repo):
     Three-state on purpose. "the host is down" is the environment's problem;
     "the page arrived but I cannot read the number" is THIS script being broken, and
     must not hide behind an inconclusive exit code.
+
+    A third state exists because the two above are not exhaustive: GitHub answers
+    anonymous bursts with HTTP 200 and an abuse/block page (review P2-4). To a regex
+    that is indistinguishable from "GitHub changed the markup", but the two demand
+    opposite actions - one says fix the page, the other says wait. Guessing wrong
+    here sends whoever reads the output after the wrong fixer.
     """
     code, body = fetch("https://github.com/%s/%s" % (owner, repo))
     if _is_transport(code):
         return code, None, "transport"
     if code != 200:
         return code, None, "http-%s" % code
+    low = body.lower()
+    if b"repo-stars-counter-star" not in low and any(m in low for m in BLOCK_MARKERS):
+        return 200, None, "blocked"
     m = re.search(r'repo-stars-counter-star[^>]*title="([\d,]+)"',
                   body.decode("utf-8", "replace"))
     return (200, int(m.group(1).replace(",", "")), "ok") if m else (200, None, "unparsed")
@@ -534,6 +595,12 @@ def probe(dep):
     return True
 
 
+# A unit case that could not run on this host says so with this prefix, so the runner
+# counts it as a skip (exit 2) instead of a pass. Review P2-3: without it, the P0-B
+# regression silently reported OK on a machine with no curl - it had nothing to test.
+SKIP = "SKIP:"
+
+
 def _unit_transport_table():
     """0 / None / stray strings are not HTTP statuses. Review P0-B: curl prints 000
     when it cannot connect at all, int() made it a verdict, and the link check called
@@ -549,6 +616,8 @@ def _unit_transport_table():
 def _unit_curl_000():
     """Deterministic P0-B regression: an unresolvable host must come back as transport,
     whatever the machine's network looks like at the time."""
+    if not CURL:
+        return SKIP + " no curl on this host - the case did not run"
     code, _ = _curl_get("https://this-host-does-not-exist-42abc.invalid/")
     if not _is_transport(code):
         return "_curl_get returned %r for a host that cannot be resolved (000 leaked as a status?)" % (code,)
@@ -571,10 +640,127 @@ def _unit_star_parser_blindness():
     return None
 
 
+def _unit_head_status_is_observed():
+    """Deterministic P1-新 regression: when urllib is down, the curl HEAD fallback must
+    report the status curl actually saw - never a minted 200.
+
+    Stubbed at the subprocess boundary, not at _curl_head, so the real parser runs; and
+    with a canned payload, so this case fires on a machine with no network at all.
+    """
+    if not CURL:
+        return SKIP + " no curl on this host - the fallback this case tests did not run"
+    payload = (b"HTTP/1.1 301 Moved Permanently\r\n"
+               b"location: https://revolutionla.github.io/not-here-42/\r\n"
+               b"last-modified: Mon, 01 Jan 2024 00:00:00 GMT\r\n\r\n"
+               b"HTTP/1.1 404 Not Found\r\ncontent-type: text/html\r\n"
+               b"server: GitHub.com\r\n\r\n404")
+    saved_run, saved_open = subprocess.run, urllib.request.urlopen
+
+    class Fake(object):
+        returncode = 0
+        stdout = payload
+        stderr = b""
+
+    try:
+        subprocess.run = lambda *a, **k: Fake()
+        urllib.request.urlopen = _raise_reset
+        code, heads = _head_headers("https://revolutionla.github.io/not-here-42/")
+        if code != 404:
+            return "curl HEAD fallback reported %r for a page whose status line says 404 " \
+                   "(a minted 200 is an integer that was never observed)" % (code,)
+        if not heads or heads.get("server") != "GitHub.com":
+            return "curl HEAD fallback parsed headers wrong: %r" % (heads,)
+        # The 404 page reports no date of its own; a date in this dict came from the
+        # redirect hop, and last_modified() would hand it to the sitemap guard as if
+        # the deployed page had vouched for it.
+        if "last-modified" in heads or "location" in heads:
+            return "curl HEAD kept a header from the 301 hop it did not settle on: %r" % (heads,)
+
+        # And the same path must not turn "no status line" into a verdict either.
+        Fake.stdout = b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n000"
+        code2, _ = _head_headers("https://revolutionla.github.io/not-here-42/")
+        if not _is_transport(code2):
+            return "curl HEAD fallback turned a missing response (%r) into status %r" % (Fake.stdout, code2)
+    finally:
+        subprocess.run, urllib.request.urlopen = saved_run, saved_open
+    return None
+
+
+def _raise_reset(*a, **k):
+    raise urllib.error.URLError("simulated proxy reset")
+
+
+def _unit_blocked_page_is_not_blindness():
+    """Deterministic P2-4 regression: GitHub's 200 abuse interstitial must read as
+    'the environment is throttling us', not as 'the scraper broke'."""
+    global fetch
+    saved = fetch
+    try:
+        fetch = lambda url, retries=2: (
+            200, b"<html><h1>Whoa there!</h1><p>You have triggered an abuse detection "
+                 b"mechanism.</p></html>")
+        code, n, state = stars_of("RevolutionLA", "shijing")
+    finally:
+        fetch = saved
+    if state != "blocked":
+        return "stars_of read GitHub's block page as %r - a rate limit would be filed as " \
+               "a broken scraper and send the reader to fix markup" % (state,)
+    if n is not None:
+        return "stars_of found %r stars on a block page" % (n,)
+    return None
+
+
+SITE_FILES = ("index.html", "assets/css/styles.css", "assets/img/og-image.png",
+              "sitemap.xml")
+
+
+def _copy_site(src, dst):
+    for rel in SITE_FILES:
+        d = os.path.join(dst, rel)
+        os.makedirs(os.path.dirname(d), exist_ok=True)
+        shutil.copy(os.path.join(src, rel), d)
+    return dst
+
+
+def _unit_throttle_is_not_a_dead_link():
+    """Deterministic reverse case: 429 / 502 / 503 are the server reacting to OUR burst
+    (this loop makes a dozen requests), not evidence about the page. Filing them as
+    'visitors cannot reach it' is the P0-B mistake with a different number in it.
+
+    Stubbed so it runs with no network at all, and it asserts the direction that a
+    mutation case cannot: the checker must STAY SILENT about the URL.
+    """
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="claims-throttle-")
+    global fetch, _head_headers
+    saved_fetch, saved_head = fetch, _head_headers
+    try:
+        _copy_site(ROOT, tmp)
+        fetch = lambda url, retries=2: (429, b"")
+        _head_headers = lambda url, timeout=25: ("err:simulated-off", None)
+        found, unknown = check(tmp, offline=False)
+    finally:
+        fetch, _head_headers = saved_fetch, saved_head
+        shutil.rmtree(tmp, ignore_errors=True)
+    accused = [f for f in found if "cannot reach" in f]
+    if accused:
+        return "a 429 was reported as a dead link: %r" % (accused[0],)
+    hedged = [u for u in unknown if "throttled by the host" in u]
+    if not hedged:
+        return "no inconclusive mentioned the throttle; the 429 was swallowed silently: %r" % (unknown,)
+    if not [u for u in unknown if "badge for" in u or "unchecked" in u]:
+        return "star badges under a 429 produced no 'unchecked' inconclusive: %r" % (unknown,)
+    return None
+
+
 UNIT_CASES = [
     ("transport classification table", _unit_transport_table),
     ("curl 000 is transport, not HTTP 0", _unit_curl_000),
     ("star parser blindness is not 'ok'", _unit_star_parser_blindness),
+    ("curl HEAD reports the status it saw, not 200", _unit_head_status_is_observed),
+    ("GitHub block page is not scraper blindness", _unit_blocked_page_is_not_blindness),
+    ("HTTP 429 must not read as a dead link (refused to accuse)",
+     _unit_throttle_is_not_a_dead_link),
 ]
 
 
@@ -585,7 +771,11 @@ def selftest(root):
     skipped = []
     for label, fn in UNIT_CASES:
         err = fn()
-        if err:
+        if err and err.startswith(SKIP):
+            note = err[len(SKIP):].strip()
+            skipped.append("%s (%s)" % (label, note))
+            print("selftest [%s] SKIPPED - %s" % (label, note))
+        elif err:
             print("selftest FAILED - %s: %s" % (label, err))
             rc = 1
         else:
@@ -597,12 +787,7 @@ def selftest(root):
             continue
         tmp = tempfile.mkdtemp(prefix="claims-selftest-")
         try:
-            for rel in ("index.html", "assets/css/styles.css", "assets/img/og-image.png",
-                        "sitemap.xml"):
-                src = os.path.join(root, rel)
-                dst = os.path.join(tmp, rel)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copy(src, dst)
+            _copy_site(root, tmp)
             p = os.path.join(tmp, target)
             s = open(p, encoding="utf-8").read()
             if old not in s:
@@ -627,13 +812,26 @@ def selftest(root):
             elif any(expect in f for f in found):
                 print("selftest OK - caught %s" % label)
             else:
-                print("selftest FAILED - blind to %s: %r" % (label, found))
-                rc = 1
+                # If the host throttled this run, the case never got to observe
+                # anything - saying "blind to X" would send the reader to fix a
+                # checker that works. Misattribution is the failure this whole
+                # file exists to prevent, so it applies to its own output too.
+                throttled = [u for u in unknown
+                             if "throttled by the host" in u or "block/abuse page" in u]
+                if throttled:
+                    skipped.append("%s (host throttled the run)" % label)
+                    print("selftest [%s] SKIPPED - host throttled the run: %s"
+                          % (label, throttled[0]))
+                else:
+                    print("selftest FAILED - blind to %s: %r" % (label, found))
+                    rc = 1
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
     if skipped:
         print("(%d case(s) skipped: %s)" % (len(skipped), "; ".join(skipped)))
-    print("%d case(s) ran, %d skipped" % (len(CASES) - len(skipped), len(skipped)))
+    total = len(CASES) + len(UNIT_CASES)
+    print("%d case(s) ran, %d skipped (of %d)"
+          % (total - len(skipped), len(skipped), total))
     if skipped and rc == 0:
         # An un-run case is not a passed case: exit 2 says "selftest was incomplete"
         # so CI cannot read a silent SKIP as a green board (review P1-B).
