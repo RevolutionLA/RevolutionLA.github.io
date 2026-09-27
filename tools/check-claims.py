@@ -3,7 +3,7 @@
     python tools/check-claims.py [--root DIR] [--offline] [--selftest]
 
 Exit codes are three-state on purpose:
-  0  every claim holds
+  0  every claim holds (also: --offline ran the static claims cleanly)
   1  at least one claim is false        <- fix the page
   2  inconclusive (network/dependency) <- re-run somewhere else; NOT a pass, NOT a failure
 
@@ -17,8 +17,13 @@ Design rules this file lives by:
 - A claim that cannot be checked is a FINDING, not a silent skip. (Review 2026-09-27:
   deriving the repo from the card href skipped 4 of 9 badges, and a 187-star badge
   drifted to 188 unnoticed, live.)
+- "Cannot check" splits in two, and the split decides the colour: the environment not
+  answering is inconclusive, but *this script* failing to read a page that answered
+  200 is a finding — the watcher broke, and the digits on the page are now unwatched.
+- Anything that is not an integer HTTP status is transport, never a verdict. curl
+  prints 000 when it could not connect; read as HTTP 0 that became a false dead link.
 - `--selftest` mutates a copy and asserts the checker reports it. A check that cannot
-  fail is not a check.
+  fail is not a check; a selftest that SKIPS cases must not report success either.
 """
 import argparse
 import datetime
@@ -63,12 +68,20 @@ def _curl_get(url, timeout=25):
             capture_output=True, timeout=timeout + 5)
     except Exception as e:
         return "err:curl-%s" % type(e).__name__, b""
+    if p.returncode != 0:
+        # 6 = could not resolve, 7 = failed to connect, 35 = TLS, 28 = timeout.
+        # None of those is an HTTP status, so none of them may be reported as one.
+        return "err:curl-exit-%d" % p.returncode, p.stderr[:120]
     out = p.stdout
     i = out.rfind(b"\n")
     if i < 0:
         return "err:curl-no-status", b""
     code, body = out[i + 1:].strip(), out[:i]
-    return (int(code) if code.isdigit() else "err:curl-%s" % code.decode("ascii", "replace")), body
+    if not code.isdigit() or int(code) == 0:
+        # curl prints 000 for "no HTTP response at all" even with exit status 0;
+        # int("000") == 0 would otherwise reach the link check and read as a dead link.
+        return "err:curl-code-%s" % code.decode("ascii", "replace"), body
+    return int(code), body
 
 
 def fetch(url, retries=2):
@@ -84,30 +97,69 @@ def fetch(url, retries=2):
 
 
 def _is_transport(code):
-    return isinstance(code, str) and code.startswith("err:")
+    """Anything that is not an HTTP status code is a transport problem.
+
+    Defined by exclusion rather than by matching "err:" so a new fallback path
+    leaking a stray value degrades to inconclusive instead of to an accusation.
+    (Review 2026-09-27 P0-B: curl's `000` parsed to int 0 and was reported as
+    'visitors cannot reach it' - exactly the false alarm this script exists to stop.)
+    """
+    return not (isinstance(code, int) and 100 <= code <= 599)
+
+
+def _parse_lm(raw):
+    if not raw:
+        return None
+    try:
+        # Pages stamps UTC; the sitemap date is a local calendar date. Comparing the
+        # two raw makes every push before 08:00 local look a day ahead of itself.
+        dt = parsedate_to_datetime(raw)
+        return dt.astimezone().date() if dt.tzinfo else dt.date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _head_headers(url, timeout=25):
+    """HEAD with urllib, falling back to curl -I: this machine's proxy resets urllib
+    on its own, and five 'lastmod unverified' lines are not a pass (review P1-C)."""
+    req = urllib.request.Request(url, headers=dict(UA), method="HEAD")
+    code = None
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.headers
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers
+    except Exception as e:
+        code = "err:%s" % (e.reason if isinstance(e, urllib.error.URLError)
+                            else type(e).__name__)
+    if not CURL:
+        return code, None
+    try:
+        p = subprocess.run([CURL, "-sSIL", "--max-time", str(timeout), url],
+                           capture_output=True, timeout=timeout + 5)
+    except Exception as e:
+        return "err:curl-%s" % type(e).__name__, None
+    if p.returncode != 0:
+        return "err:curl-exit-%d" % p.returncode, None
+    heads = {}
+    for line in p.stdout.split(b"\n"):
+        k, sep, v = line.partition(b":")
+        if sep and k.strip():
+            heads[k.strip().lower().decode("ascii", "replace")] = v.strip().decode(
+                "ascii", "replace")
+    return 200, heads
 
 
 def last_modified(url):
     """Pages' own Last-Modified header - the only date a deployed page can vouch for.
     Returns (code, date_or_None)."""
-    req = urllib.request.Request(url, headers=dict(UA), method="HEAD")
-    try:
-        with urllib.request.urlopen(req, timeout=25) as r:
-            code, raw = r.status, r.headers.get("Last-Modified")
-    except urllib.error.HTTPError as e:
-        return e.code, None
-    except Exception as e:
-        return "err:%s" % (e.reason if isinstance(e, urllib.error.URLError)
-                           else type(e).__name__), None
-    if not raw:
+    code, headers = _head_headers(url)
+    if _is_transport(code) or headers is None:
         return code, None
-    try:
-        # Pages stamps UTC; the sitemap date is a local calendar date. Comparing the
-        # two raw makes every push before 08:00 local look a day ahead of itself.
-        dt = parsedate_to_datetime(raw)
-        return code, dt.astimezone().date() if dt.tzinfo else dt.date()
-    except (TypeError, ValueError):
-        return code, None
+    raw = headers.get("last-modified")
+    if raw is None and not isinstance(headers, dict):
+        raw = headers.get("Last-Modified")
+    return code, _parse_lm(raw)
 
 
 def png_size(path):
@@ -187,20 +239,31 @@ def check(root, offline=False):
         bad("ItemList numberOfItems says %r, actually %d entries"
             % (il.get("numberOfItems"), len(items)))
 
+    # Normalise once: a legal-but-malformed ListItem (missing/non-object `item`) must
+    # produce a finding, not a KeyError stack trace (review P2-B).
+    its = []
+    for i, el in enumerate(items):
+        it = el.get("item") if isinstance(el, dict) else None
+        if not isinstance(it, dict):
+            bad("ItemList element %d carries no object-valued 'item' - "
+                "its claims cannot be checked" % (i + 1))
+            it = {}
+        its.append(it)
+
     # ---------- static: name -> repo map, taken from sameAs (authoritative) ----------
     repo_by_name = {}
-    for it in [i.get("item", {}) for i in items]:
+    for it in its:
         mm = re.search(r"github\.com/([^/]+)/([^/\"?#]+)", str(it.get("sameAs", "")))
         if mm and it.get("name"):
             repo_by_name[it["name"]] = mm.groups()
 
     card_names = [m.group(1) for _, b in cards for m in [re.search(r'<h4 class="pc-name">(.*?)</h4>', b)] if m]
-    for it in [i.get("item", {}) for i in items]:
+    for it in its:
         if it.get("name") and it["name"] not in card_names:
             bad("ItemList entry '%s' has no card on the page" % it["name"])
 
     # ---------- static: card <-> ItemList, and case-exact href mapping ----------
-    urls = {i["item"].get("url", "") for i in items}
+    urls = {it.get("url", "") for it in its}
     for href, body in cards:
         nm = re.search(r'<h4 class="pc-name">(.*?)</h4>', body)
         name = nm.group(1) if nm else "?"
@@ -311,13 +374,15 @@ def check(root, offline=False):
         bad("sitemap.xml missing")
 
     if offline:
-        return findings, unknown + ["--offline: link, star and README claims unchecked"]
+        # A deliberate skip is not "inconclusive": exit 2 here would make --offline
+        # useless as a CI gate (always red) or the gate blind (2 treated as pass).
+        return findings, unknown
 
     # ---------- network: every public URL must answer 200 to an anonymous visitor ----
     anon = set(h for h, _ in cards) | set(sm_locs)
-    for i in items:
+    for it in its:
         for k in ("url", "sameAs"):
-            v = i["item"].get(k)
+            v = it.get(k)
             if isinstance(v, str) and v.startswith("http"):
                 anon.add(v)
     for prop, attr in (("og:image", "property"), ("twitter:image", "name")):
@@ -341,6 +406,9 @@ def check(root, offline=False):
     # ---------- network: sitemap lastmod must be backed by the deployed page ----------
     # Pages stamps Last-Modified at build time, so it is the only date a live URL can
     # vouch for. Writing this sitemap without that check put 3 of 4 dates a month ahead.
+    # Tolerance is +-1 day on purpose: the header is UTC while a hand-written lastmod is
+    # a local calendar date, so the two conventions legitimately differ by a day
+    # (review P2-A: three entries said 08-23 where the page said 08-23 GMT / 08-24 local).
     for loc, declared_s in sm_dates:
         declared = datetime.date.fromisoformat(declared_s)
         code, live = last_modified(loc)
@@ -349,7 +417,7 @@ def check(root, offline=False):
             unk("cannot read Last-Modified for %s (%s)" % (loc, code))
         elif live is None:
             unk("no Last-Modified header for %s; lastmod %s unverified" % (loc, declared_s))
-        elif declared > live and (declared - live).days > 1:
+        elif abs((declared - live).days) > 1:
             bad("sitemap says %s lastmod %s, but the deployed page reports %s"
                 % (loc, declared_s, live))
         elif declared > live:
@@ -358,9 +426,15 @@ def check(root, offline=False):
 
     # ---------- network: star badges against the live repo page ----------
     for name, (owner, r), claimed in star_claims:
-        code, n = stars_of(owner, r)
+        code, n, state = stars_of(owner, r)
         time.sleep(0.3)
-        if n is None:
+        if state == "unparsed":
+            # The page answered, we just can no longer read the number out of it.
+            # That is this script breaking, not the environment - and those digits on
+            # the page are now unwatched, which is exactly how 187 reached production.
+            bad("star counter not found in github.com/%s/%s (HTTP 200) - the scraper is "
+                "blind and the %d★ badge for '%s' is unwatched" % (owner, r, claimed, name))
+        elif state != "ok":
             unk("cannot read %s/%s anonymously (%s), badge for '%s' unchecked"
                 % (owner, r, code, name))
         elif n != claimed:
@@ -390,57 +464,118 @@ def check(root, offline=False):
 
 def stars_of(owner, repo):
     """Scrape the public repo page instead of api.github.com: the API is capped at
-    60 anonymous calls/hour, which turns a passing run into a flaky failure."""
+    60 anonymous calls/hour, which turns a passing run into a flaky failure.
+
+    Three-state on purpose. "the host is down" is the environment's problem;
+    "the page arrived but I cannot read the number" is THIS script being broken, and
+    must not hide behind an inconclusive exit code.
+    """
     code, body = fetch("https://github.com/%s/%s" % (owner, repo))
     if _is_transport(code):
-        return code, None
+        return code, None, "transport"
     if code != 200:
-        return code, None
+        return code, None, "http-%s" % code
     m = re.search(r'repo-stars-counter-star[^>]*title="([\d,]+)"',
                   body.decode("utf-8", "replace"))
-    return (200, int(m.group(1).replace(",", ""))) if m else (code, None)
+    return (200, int(m.group(1).replace(",", "")), "ok") if m else (200, None, "unparsed")
 
 
 CASES = [
-    # label, target file, old, new, expected substring, dependency
+    # label, target file, old, new, expect, dependency, mode
     # dependency: None = pure static; "github" = github.com HTML pages;
     # "raw" = raw.githubusercontent.com; "pages" = this site as deployed on Pages
-    ("project count claim", "index.html", "以下 9 个项目", "以下 42 个项目", "prose says", None),
+    # mode: "finding"  -> some finding must contain `expect`
+    #       "transport"-> no finding may accuse the mutated URL of being dead, and
+    #                      an inconclusive must mention it (a refusal to guess)
+    ("project count claim", "index.html", "以下 9 个项目", "以下 42 个项目", "prose says", None, "finding"),
     ("dead link", "index.html", "https://github.com/RevolutionLA/shijing",
-     "https://github.com/RevolutionLA/thisRepoDoesNotExist-42", "visitors cannot reach", "github"),
+     "https://github.com/RevolutionLA/thisRepoDoesNotExist-42", "visitors cannot reach", "github", "finding"),
     ("sub-threshold small text", "assets/css/styles.css",
-     "--ink-faint: #7a8798", "--ink-faint: #5d6878", "text is", None),
-    ("stale star badge", "index.html", "开源工作站 · 3★", "开源工作站 · 999★", "badge says", "github"),
+     "--ink-faint: #7a8798", "--ink-faint: #5d6878", "text is", None, "finding"),
+    ("stale star badge", "index.html", "开源工作站 · 3★", "开源工作站 · 999★", "badge says", "github", "finding"),
     ("star badge the checker cannot cover", "index.html",
      '<h4 class="pc-name">adversarial-review</h4>', '<h4 class="pc-name">adversarial-reviewx</h4>',
-     "no repo in ItemList sameAs", None),
-    ("false 收录 claim", "index.html", "收录近 70 个", "收录近 900 个", "claim '", "raw"),
-    ("收录 claim removed", "index.html", "收录近 70 个", "收录一批", "gone blind", None),
+     "no repo in ItemList sameAs", None, "finding"),
+    ("false 收录 claim", "index.html", "收录近 70 个", "收录近 900 个", "claim '", "raw", "finding"),
+    ("收录 claim removed", "index.html", "收录近 70 个", "收录一批", "gone blind", None, "finding"),
     ("heading skip", "index.html",
      '<h3 class="pg-head mono"><span class="pg-label">AI · 音乐创作</span>'
      '<span class="pg-rule" aria-hidden="true"></span></h3>',
      '<h5 class="pg-head mono"><span class="pg-label">AI · 音乐创作</span>'
-     '<span class="pg-rule" aria-hidden="true"></span></h5>', "heading jumps", None),
+     '<span class="pg-rule" aria-hidden="true"></span></h5>', "heading jumps", None, "finding"),
     ("og size mismatch", "index.html", 'og:image:width" content="1200"',
-     'og:image:width" content="1201"', "og-image is", None),
+     'og:image:width" content="1201"', "og-image is", None, "finding"),
     ("sitemap repo name wrong case", "sitemap.xml", "/AscendMate/", "/ascendmate/",
-     "case-sensitive", None),
+     "case-sensitive", None, "finding"),
     ("sitemap lastmod ahead of the deployed page", "sitemap.xml",
-     "<lastmod>2026-08-23</lastmod>", "<lastmod>2026-09-26</lastmod>",
-     "deployed page reports", "pages"),
+     "<lastmod>2026-08-24</lastmod>", "<lastmod>2026-09-26</lastmod>",
+     "deployed page reports", "pages", "finding"),
+    ("unreachable host must not read as a dead link", "index.html",
+     "https://github.com/RevolutionLA/shijing", "https://this-host-does-not-exist-42abc.invalid/",
+     "this-host-does-not-exist-42abc.invalid", "github", "transport"),
+    ("malformed ListItem must be a finding, not a crash", "index.html",
+     '"item": {', '"items": {',
+     "carries no object-valued 'item'", None, "finding"),
 ]
 
 
 def probe(dep):
     """Which external host this case actually needs. Asserting on the real dependency,
-    not on 'is the internet up', is what keeps a skip honest instead of a false pass."""
+    not on 'is the internet up', is what keeps a skip honest instead of a false pass.
+
+    Measures REACHABILITY only, never a parsed value: if it probed the star scraper,
+    a broken scraper would SKIP the star cases and still exit 0 (review P1-B)."""
     if dep == "github":
-        return stars_of("RevolutionLA", "adversarial-review")[1] is not None
+        return fetch("https://github.com/RevolutionLA/adversarial-review")[0] == 200
     if dep == "raw":
         return fetch(YUE_README)[0] == 200
     if dep == "pages":
-        return last_modified("https://revolutionla.github.io/")[1] is not None
+        return last_modified("https://revolutionla.github.io/")[0] == 200
     return True
+
+
+def _unit_transport_table():
+    """0 / None / stray strings are not HTTP statuses. Review P0-B: curl prints 000
+    when it cannot connect at all, int() made it a verdict, and the link check called
+    the local proxy's hiccup 'visitors cannot reach it'."""
+    bad_values = [0, None, "", "err:URLError", "err:curl-exit-7", 5, 600, True]
+    wrong = [repr(v) for v in bad_values if not _is_transport(v)]
+    good = [repr(v) for v in (200, 301, 403, 404, 500, 599) if _is_transport(v)]
+    if wrong or good:
+        return "_is_transport misclassifies %s%s" % (wrong, ("as verdicts: " + str(good)) if good else "")
+    return None
+
+
+def _unit_curl_000():
+    """Deterministic P0-B regression: an unresolvable host must come back as transport,
+    whatever the machine's network looks like at the time."""
+    code, _ = _curl_get("https://this-host-does-not-exist-42abc.invalid/")
+    if not _is_transport(code):
+        return "_curl_get returned %r for a host that cannot be resolved (000 leaked as a status?)" % (code,)
+    return None
+
+
+def _unit_star_parser_blindness():
+    """P1-A: a 200 page whose markup we no longer recognise is the scraper breaking."""
+    global fetch
+    saved = fetch
+    try:
+        fetch = lambda url, retries=2: (200, b"<html><body>changed markup</body></html>")
+        code, n, state = stars_of("RevolutionLA", "shijing")
+    finally:
+        fetch = saved
+    if state != "unparsed":
+        return "stars_of on an unparseable 200 page said %r, expected 'unparsed' (would be filed as inconclusive)" % state
+    if n is not None:
+        return "stars_of invented %r out of a page with no star counter" % (n,)
+    return None
+
+
+UNIT_CASES = [
+    ("transport classification table", _unit_transport_table),
+    ("curl 000 is transport, not HTTP 0", _unit_curl_000),
+    ("star parser blindness is not 'ok'", _unit_star_parser_blindness),
+]
 
 
 def selftest(root):
@@ -448,7 +583,14 @@ def selftest(root):
     import tempfile
     rc = 0
     skipped = []
-    for label, target, old, new, expect, dep in CASES:
+    for label, fn in UNIT_CASES:
+        err = fn()
+        if err:
+            print("selftest FAILED - %s: %s" % (label, err))
+            rc = 1
+        else:
+            print("selftest OK - %s" % label)
+    for label, target, old, new, expect, dep, mode in CASES:
         if dep and not probe(dep):
             skipped.append("%s (%s host unreachable)" % (label, dep))
             print("selftest [%s] SKIPPED - depends on unreachable host" % label)
@@ -468,8 +610,21 @@ def selftest(root):
                 rc = 1
                 continue
             open(p, "w", encoding="utf-8").write(s.replace(old, new))
-            found, _ = check(tmp, offline=dep is None)
-            if any(expect in f for f in found):
+            found, unknown = check(tmp, offline=dep is None)
+            if mode == "transport":
+                accused = [f for f in found if "cannot reach" in f and expect in f]
+                hedged = [u for u in unknown if expect in u]
+                if accused:
+                    print("selftest FAILED - %s accused a URL it could not reach: %r"
+                          % (label, accused[0]))
+                    rc = 1
+                elif not hedged:
+                    print("selftest FAILED - %s produced no inconclusive for %s: %r"
+                          % (label, expect, unknown))
+                    rc = 1
+                else:
+                    print("selftest OK - %s (refused to guess)" % label)
+            elif any(expect in f for f in found):
                 print("selftest OK - caught %s" % label)
             else:
                 print("selftest FAILED - blind to %s: %r" % (label, found))
@@ -479,6 +634,11 @@ def selftest(root):
     if skipped:
         print("(%d case(s) skipped: %s)" % (len(skipped), "; ".join(skipped)))
     print("%d case(s) ran, %d skipped" % (len(CASES) - len(skipped), len(skipped)))
+    if skipped and rc == 0:
+        # An un-run case is not a passed case: exit 2 says "selftest was incomplete"
+        # so CI cannot read a silent SKIP as a green board (review P1-B).
+        print("selftest INCONCLUSIVE - coverage incomplete, do not treat as a pass")
+        rc = 2
     return rc
 
 
@@ -495,6 +655,8 @@ def main():
         print("FAIL   %s" % f)
     for u in unknown:
         print("UNSURE %s" % u)
+    if a.offline:
+        print("note: --offline, so link / star / README claims were not checked")
     print("%d finding(s), %d inconclusive" % (len(found), len(unknown)))
     if found:
         sys.exit(1)

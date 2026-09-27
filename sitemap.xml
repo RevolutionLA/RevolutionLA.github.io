@@ -7,10 +7,11 @@
     <priority>1.0</priority>
   </url>
   <!-- GitHub Pages 路径大小写敏感：下面的 loc 必须与仓库名逐字符一致。
-       lastmod 取自各子页线上响应的 Last-Modified，不凭印象填写。 -->
+       lastmod 取自线上响应的 Last-Modified 并折算成北京时间（UTC+8）——
+       检查器按同一套约定比对，两侧混用会留下盲区。 -->
   <url>
     <loc>https://revolutionla.github.io/dsh-dream-skin/</loc>
-    <lastmod>2026-08-23</lastmod>
+    <lastmod>2026-08-24</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
@@ -22,13 +23,13 @@
   </url>
   <url>
     <loc>https://revolutionla.github.io/ascend-assistant/</loc>
-    <lastmod>2026-08-23</lastmod>
+    <lastmod>2026-08-24</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://revolutionla.github.io/OpenKidCar/</loc>
-    <lastmod>2026-08-23</lastmod>
+    <lastmod>2026-08-24</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
