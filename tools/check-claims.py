@@ -683,8 +683,8 @@ CASES = [
     ("dead link", "index.html", "https://github.com/RevolutionLA/shijing",
      "https://github.com/RevolutionLA/thisRepoDoesNotExist-42", "visitors cannot reach", "github", "finding"),
     ("sub-threshold small text", "assets/css/styles.css",
-     "--ink-faint: #7a8798", "--ink-faint: #5d6878", "text is", None, "finding"),
-    ("stale star badge", "index.html", "开源工作站 · 3★", "开源工作站 · 999★", "badge says", "github", "finding"),
+     "--ink-faint: #8290a2", "--ink-faint: #5d6878", "text is", None, "finding"),
+    ("stale star badge", "index.html", "开源工作站 · 4★", "开源工作站 · 999★", "badge says", "github", "finding"),
     ("star badge the checker cannot cover", "index.html",
      '<h4 class="pc-name">adversarial-review</h4>', '<h4 class="pc-name">adversarial-reviewx</h4>',
      "no repo in ItemList sameAs", None, "finding"),
@@ -707,11 +707,14 @@ CASES = [
     ("drawer state never announced", "assets/js/main.js",
      "    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');\n", "",
      "never updates aria-expanded", None, "finding"),
+    # 锚在 FEATURE 那一组：它前面是 h2 区块标题，改成 h5 才真的构成跳级。
+    # （后面那几组的 h3 前面已经排着 h4 卡名，h4->h5 不算 skip，锚在那儿等于没测。）
     ("heading skip", "index.html",
-     '<h3 class="pg-head mono"><span class="pg-label">AI · 音乐创作</span>'
-     '<span class="pg-rule" aria-hidden="true"></span></h3>',
-     '<h5 class="pg-head mono"><span class="pg-label">AI · 音乐创作</span>'
-     '<span class="pg-rule" aria-hidden="true"></span></h5>', "heading jumps", None, "finding"),
+     '<h3 class="pg-head mono"><span class="pg-label">FEATURE · 最受关注</span>'
+     '<span class="pg-rule" aria-hidden="true"></span><span class="pg-count">01</span></h3>',
+     '<h5 class="pg-head mono"><span class="pg-label">FEATURE · 最受关注</span>'
+     '<span class="pg-rule" aria-hidden="true"></span><span class="pg-count">01</span></h5>',
+     "heading jumps", None, "finding"),
     ("og size mismatch", "index.html", 'og:image:width" content="1200"',
      'og:image:width" content="1201"', "og-image is", None, "finding"),
     ("sitemap repo name wrong case", "sitemap.xml", "/AscendMate/", "/ascendmate/",
