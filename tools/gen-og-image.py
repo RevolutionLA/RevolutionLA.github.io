@@ -2,20 +2,59 @@
 
     python tools/gen-og-image.py
 
-Requires Pillow and the HarmonyOS Sans SC / Consolas fonts that the site's own
-artwork leans on; on a machine without them, edit F below to any CJK-capable TTF.
+Needs Pillow plus one CJK sans with a Bold and a Medium cut, and a monospace.
+The card was first drawn with HarmonyOS Sans SC + Consolas on Windows; the same
+layout is reproduced on Linux with Noto Sans CJK SC + Liberation Mono (which is
+metric-compatible with Consolas, so the mono rows land where they were designed
+to). Each face is resolved from a candidate list, so the tool runs on either box
+instead of only the one it was first written on.
 """
 import math
 import os
+import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-F = "C:/Windows/Fonts"
-ZH_B = os.path.join(F, "HarmonyOS_Sans_SC_Bold.ttf")
-ZH_M = os.path.join(F, "HarmonyOS_Sans_SC_Medium.ttf")
-MONO_B = os.path.join(F, "consolab.ttf")
-MONO_R = os.path.join(F, "consola.ttf")
+
+
+def _face(candidates, want_sc=True):
+    """First existing font file wins; for a .ttc, find the face index that is the
+    Simplified-Chinese one. Hardcoding index=2 would quietly switch the card to
+    Japanese glyph variants the day the package reorders its faces."""
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        if not want_sc:
+            return path, 0
+        for i in range(12):
+            try:
+                f = ImageFont.truetype(path, 12, index=i)
+            except OSError:
+                break
+            if "SC" in f.getname()[0]:
+                return path, i
+        return path, 0          # 单面字体：没有 SC 变体可挑，就用第一个
+    return None, 0
+
+
+ZH_B = _face(["C:/Windows/Fonts/HarmonyOS_Sans_SC_Bold.ttf",
+              "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"])
+ZH_M = _face(["C:/Windows/Fonts/HarmonyOS_Sans_SC_Medium.ttf",
+              "/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc"])
+MONO_B = _face(["C:/Windows/Fonts/consolab.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf"],
+               want_sc=False)
+MONO_R = _face(["C:/Windows/Fonts/consola.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"],
+               want_sc=False)
+_missing = [n for n, spec in (("中文 Bold", ZH_B), ("中文 Medium", ZH_M),
+                              ("等宽 Bold", MONO_B), ("等宽 Regular", MONO_R))
+            if spec[0] is None]
+if _missing:
+    sys.exit("gen-og-image: no font found for %s - point _face() at a local file "
+             "instead of shipping a card drawn with a fallback font"
+             % ", ".join(_missing))
 
 W, H = 1200, 630
 SPACE0 = (7, 9, 13)
@@ -45,8 +84,9 @@ for y in range(0, H, 40):
     d.line([(0, y), (W, y)], fill=(148, 168, 190, 18), width=1)
 
 
-def font(path, size):
-    return ImageFont.truetype(path, size)
+def font(spec, size):
+    path, index = spec
+    return ImageFont.truetype(path, size, index=index)
 
 
 # 示波器波形（右下角，站点 hero 同款折线语汇）
@@ -69,7 +109,7 @@ d.line(pts, fill=(52, 240, 160, 90), width=1)
 # 顶部 mono 标签
 d.text((72, 52), ">_", font=font(MONO_B, 26), fill=SIGNAL)
 d.text((112, 56), "RevolutionLA", font=font(MONO_B, 21), fill=INK)
-d.text((72, 96), "SIGNAL_INBOUND · AI EXPLORER", font=font(MONO_R, 15), fill=FAINT)
+d.text((72, 96), "SIGNAL INBOUND · AI EXPLORER", font=font(MONO_R, 15), fill=FAINT)
 d.line([(690, 68), (W - 72, 68)], fill=(148, 168, 190, 46), width=1)
 # 不带项目计数：数字会随主页增删而失真
 d.text((W - 72, 56), "WORK · OPEN SOURCE", font=font(MONO_R, 15), fill=DIM, anchor="ra")
