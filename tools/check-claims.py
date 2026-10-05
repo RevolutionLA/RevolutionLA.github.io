@@ -47,6 +47,66 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UA = {"User-Agent": "Mozilla/5.0 (claims-check; link and claim verification)"}
 CURL = shutil.which("curl")
 YUE_README = "https://raw.githubusercontent.com/RevolutionLA/awesome-YuE/HEAD/README.md"
+NPM_PKG = "dsh-dream-skin"
+# 页面写的是「发布以来累计」，所以核对的左端点就是发布日；npm 没有 all-time 端点，
+# 只有区间端点，累计值由下面的按年分片求和得到。
+NPM_SINCE = datetime.date(2026, 8, 15)
+NPM_REG = "https://registry.npmjs.org/%s" % NPM_PKG
+
+
+def npm_range_url(a, b):
+    return "https://api.npmjs.org/downloads/range/%s:%s/%s" % (
+        a.isoformat(), b.isoformat(), NPM_PKG)
+
+
+# probe() asks this one: it is the first chunk every cumulative total is built from.
+NPM_FIRST_CHUNK = npm_range_url(NPM_SINCE, NPM_SINCE + datetime.timedelta(days=364))
+
+
+def npm_cumulative(today):
+    """Sum npm's daily download counts from the publish date to `today`, inclusive.
+
+    npm has no all-time endpoint, only ranges. One call covers the package today, but
+    the walk is chunked at 365 days so the check cannot turn into a false alarm the day
+    the package turns one year old - the failure mode would be a red run blaming the
+    page for a limit nobody told it about.
+
+    Returns (total, err); err is None, or "unk:<why>" / "bad:<why>" so the caller can
+    keep the same three-state verdict discipline as every other network site.
+    """
+    total, cur = 0, NPM_SINCE
+    while cur <= today:
+        stop = min(cur + datetime.timedelta(days=364), today)
+        url = npm_range_url(cur, stop)
+        code, blob = fetch(url)
+        if _is_transport(code):
+            return None, "unk:cannot fetch %s (%s): npm download claim unchecked" % (url, code)
+        if code in THROTTLE:
+            return None, "unk:HTTP %d for %s - %s; npm download claim unchecked" % (
+                code, url, THROTTLE[code])
+        if code != 200:
+            return None, "bad:anonymous HTTP %d for %s" % (code, url)
+        try:
+            doc = json.loads(blob.decode("utf-8", "replace"))
+        except ValueError:
+            # 200 但读不出数字：是这个脚本瞎了，不是页面在撒谎
+            return None, ("bad:npm downloads API returned 200 that is not JSON - the "
+                          "download claim is unwatched")
+        rows = doc.get("downloads")
+        if not isinstance(rows, list):
+            return None, ("bad:npm downloads API returned JSON without a 'downloads' "
+                          "list (%r) - the download claim is unwatched"
+                          % (str(doc)[:120],))
+        # 区间端点必须真的被满足：少给一天，累计值就少一天，页面会被判成「虚高」。
+        span = (stop - cur).days + 1
+        if len(rows) < span:
+            return None, ("bad:npm downloads API covered %d of %d days in %s:%s - the "
+                          "cumulative total cannot be summed from a partial window"
+                          % (len(rows), span, cur, stop))
+        total += sum(int(r.get("downloads", 0)) for r in rows)
+        cur = stop + datetime.timedelta(days=1)
+    return total, None
+
 # GitHub answers anonymous bursts with HTTP 200 + one of these interstitials.
 BLOCK_MARKERS = (b"whoa there", b"abuse detection", b"you have been blocked",
                  b"rate limit exceeded")
@@ -65,6 +125,8 @@ THROTTLE_SITES = (
     ("star badges", ("anonymously (429)", "badge for")),
     ("awesome-YuE README claim", ("HTTP 429", "'收录' claim unchecked")),
     ("sitemap lastmod", ("HTTP 429", "lastmod")),
+    ("npm cumulative downloads", ("HTTP 429", "npm download claim unchecked")),
+    ("npm package ownership", ("HTTP 429", "npm package ownership unchecked")),
 )
 _STATUS_LINE = re.compile(rb"HTTP/[\d.]+ \d{3}")
 
@@ -332,6 +394,93 @@ def check(root, offline=False):
             it = {}
         its.append(it)
 
+    # ---------- static: 「按 star 从高到低排」是一句可机检的话 ----------
+    # 文案一旦这么写，卡片在文档顺序里的星数就必须单调不增。
+    # 这条不看网络：它查的是「页面自己说的话自不自相」；线上真实星数由下面的
+    # star badge 检查负责。两者分开，才分得清「排序错了」和「数字过期了」。
+    ladder = []
+    for href, body in cards:
+        nm = re.search(r'<h4 class="pc-name">(.*?)</h4>', body)
+        sm = re.search(r'(\d+)★', body)
+        if sm:
+            ladder.append((nm.group(1) if nm else "?", int(sm.group(1))))
+        elif "★" in body:
+            # 「10+★」「约 10★」这种写法会让下面两条检查同时看不见这张卡：
+            # 排名不查了，线上星数也不查了。写得读不懂的徽章必须是 finding，不是盲区。
+            bad("card '%s' wears a ★ badge the checker cannot parse (%r) - the ranking "
+                "and the live star count both go blind on it"
+                % (nm.group(1) if nm else "?", body[max(0, body.index("★") - 14):body.index("★") + 1]))
+    # 名次徽章 01..NN 本身就是一句「从高到低」，所以这条不依赖文案有没有写：
+    # 删掉那句 prose 不该让排序检查一起消失（review：checker blind spot）。
+    if len(ladder) >= 2:
+        for (a, av), (b, bv) in zip(ladder, ladder[1:]):
+            if bv > av:
+                bad("the cards are presented as a star-descending ladder (ordered by stars "
+                    "从高到低), but '%s' (%d★) is listed above '%s' (%d★)" % (a, av, b, bv))
+                break
+    elif "从高到低" in idx:
+        bad("prose claims a star-descending ranking but only %d card(s) carry a readable "
+            "star badge - there is no ladder to check" % len(ladder))
+
+    # 名次编号：01..NN 连续，且与卡数一致——复制粘贴漏改最直接的表现
+    ranks = [int(r) for r in re.findall(r'<i class="pc-rank">(\d{2})</i>', idx)]
+    if not ranks:
+        bad("no pc-rank badges anywhere - the rank-ladder check has gone blind")
+    elif len(ranks) != len(cards):
+        bad("%d rank badges for %d cards - every card must carry its place in the ladder"
+            % (len(ranks), len(cards)))
+    elif ranks != list(range(1, len(ranks) + 1)):
+        bad("rank badges read %s, not a clean 01..%02d ladder over %d cards"
+            % (ranks, len(ranks), len(cards)))
+
+    # ---------- static: 关于区那排数字里，「项目」那一个就是本页的卡数 ----------
+    # 它写的是「精选」，不是「我一共多少个仓库」——主页上的仓库数一直在涨，那个数字
+    # 在这儿既查不了也不该拿来当门面；查得了的是它和页面自己列出的卡对不对得上。
+    # data-count 和正文各写一个数也不行：计数动画会把正文盖成 data-count 那个。
+    strip = re.findall(r'<li><b data-count="(\d+)">(\d+)</b>'
+                       r'<span class="mono">([^<]*)</span></li>', idx)
+    proj = [(a, b, lbl) for a, b, lbl in strip if lbl.endswith("项目")]
+    if not proj:
+        bad("no 项目 counter in .stat-strip - the headline number and the card count can "
+            "now drift apart with nobody watching")
+    else:
+        anim, shown, lbl = proj[0]
+        if anim != shown:
+            bad("the stat strip's %s counter reads %s but counts up to %s - the animation "
+                "overwrites the one the reader sees first" % (lbl, shown, anim))
+        elif int(shown) != len(cards):
+            bad("the stat strip says %s %s but the page carries %d project cards"
+                % (shown, lbl, len(cards)))
+
+    # ---------- static: 筛选开关上的数字要数得对 ----------
+    at = idx.find('class="proj-rest"')
+    if at < 0:
+        bad("no .proj-rest region found - the filter-count check has nothing to count")
+    else:
+        rest = idx[at:idx.index("</section>", at)]
+        cats = re.findall(r'data-cat="([^"]+)"', rest)
+        chips = re.findall(r'data-filter="([^"]+)"[^>]*>[^<]*<b>(\d+)</b>', rest)
+        if not chips:
+            bad("no filter chips inside .proj-rest - the filter-count check is blind")
+        for f, n in chips:
+            want = len(cats) if f == "all" else cats.count(f)
+            if int(n) != want:
+                bad("filter chip '%s' says %s but %d card(s) in .proj-rest match it"
+                    % (f, n, want))
+            elif f != "all" and want == 0:
+                # 一个 0 张卡命中的开关写「00」也是「数得对」的，但它只会让人点了全空
+                bad("filter chip '%s' matches no card in .proj-rest - it hides everything "
+                    "when clicked" % f)
+        if not any(f == "all" for f, _ in chips):
+            bad("no ALL chip in .proj-rest - visitors cannot get back to the full list")
+        # 分组标题上写的「08」是给人看的数量，和徽章一样会漏改
+        head = re.search(r'pg-label">RANKED[^<]*</span>.*?pg-count">(\d+)</span>', idx, re.S)
+        if not head:
+            bad("no RANKED group head with a pg-count - the ladder size is unstated")
+        elif int(head.group(1)) != len(cats):
+            bad("the RANKED head counts %s projects but .proj-rest renders %d cards"
+                % (head.group(1), len(cats)))
+
     # ---------- static: name -> repo map, taken from sameAs (authoritative) ----------
     repo_by_name = {}
     for it in its:
@@ -343,6 +492,22 @@ def check(root, offline=False):
     for it in its:
         if it.get("name") and it["name"] not in card_names:
             bad("ItemList entry '%s' has no card on the page" % it["name"])
+
+    # ---------- static: 结构化数据的「顺序」也得和页面一致 ----------
+    # 只比成员集合，等于允许访客看到的排序和机器读到的排序是两套。
+    if il:
+        order = str(il.get("itemListOrder", ""))
+        if "Descending" not in order:
+            bad("ItemList itemListOrder is %r while the page ranks its projects by stars "
+                "从高到低 - structured data states the opposite of the prose"
+                % (order or "(unset)",))
+        pos = [el.get("position") for el in items if isinstance(el, dict)]
+        if pos != list(range(1, len(items) + 1)):
+            bad("ItemList positions read %s, not 1..%d in list order" % (pos, len(items)))
+        names = [it.get("name") for it in its]
+        if names != card_names:
+            bad("ItemList order %s is not the order the cards appear in %s"
+                % (names, card_names))
 
     # ---------- static: card <-> ItemList, and case-exact href mapping ----------
     urls = {it.get("url", "") for it in its}
@@ -428,6 +593,14 @@ def check(root, offline=False):
               for m in re.finditer(r"收录\s*(?:近\s*)?(\d+)\s*(?:余)?\s*个", idx)]
     if not claims:
         bad("no '收录 N 个' claim found - the claim check has gone blind again")
+
+    # npm 累计下载量：先确认声明还在，再决定去不去核数
+    dl = re.search(r"累计 <b>([\d,]+)</b> 次下载", idx)
+    dl_claim = None
+    if not dl:
+        bad("no '累计 N 次下载' claim found - the npm download check has gone blind again")
+    else:
+        dl_claim = int(dl.group(1).replace(",", ""))
 
     # ---------- static: 窄屏导航必须真的能走通 ----------
     # Four review rounds carried the same item: below 760px the main nav was
@@ -642,6 +815,49 @@ def check(root, offline=False):
                 if not ok:
                     bad("claim '%s' vs %d unique repo links in awesome-YuE README" % (text, n))
 
+    # ---------- network: npm 累计下载量（只会涨，所以判法与滑窗不同） ----------
+    if dl_claim is not None:
+        live, err = npm_cumulative(datetime.datetime.now(datetime.timezone.utc).date())
+        if err:
+            kind, msg = err.split(":", 1)
+            (unk if kind == "unk" else bad)(msg)
+        elif dl_claim > live:
+            # 累计数虚高没有「窗口滑动」可以甩锅：它就是把别人的量算成了此刻的量。
+            bad("page says {:,} cumulative npm downloads, npm says {:,} since {} "
+                "- the page overstates the total by {:,}".format(
+                    dl_claim, live, NPM_SINCE, dl_claim - live))
+        elif live - dl_claim > 0.10 * live:
+            # 落后 10% ≈ 这包目前五天的量。数字没撒谎，但它已经在替过去说话了。
+            bad("page says {:,} cumulative npm downloads, npm says {:,} today "
+                "- the number on the page is {:,} downloads behind".format(
+                    dl_claim, live, live - dl_claim))
+        # 归属核对：这个包得真的是那个仓库的，否则数字再对也不是「我的」下载量
+        code2, reg = fetch(NPM_REG)
+        if _is_transport(code2):
+            unk("cannot fetch %s (%s): npm package ownership unchecked" % (NPM_REG, code2))
+        elif code2 in THROTTLE:
+            # 被限流是这台机器的处境，不是页面的错误——和上面每一条判定出口一样，
+            # 只能记 inconclusive，否则一次 429 就会被读成「访客打不开这个包」。
+            unk("HTTP %d for %s - %s; npm package ownership unchecked"
+                % (code2, NPM_REG, THROTTLE[code2]))
+        elif code2 != 200:
+            bad("anonymous %s for %s - the page credits npm downloads to a package "
+                "that does not answer" % (code2, NPM_REG))
+        else:
+            try:
+                doc2 = json.loads(reg.decode("utf-8", "replace"))
+                repo_url = (doc2.get("repository") or {}).get("url", "")
+            except ValueError:
+                bad("npm registry returned 200 that is not JSON - package ownership "
+                    "cannot be confirmed")
+                repo_url = ""
+            if repo_url and "RevolutionLA/dsh-dream-skin" not in repo_url:
+                bad("npm package dsh-dream-skin belongs to %r, not the repo the page "
+                    "links" % repo_url)
+            elif not repo_url:
+                bad("npm package dsh-dream-skin declares no repository - the download "
+                    "count cannot be attributed to it")
+
     return findings, unknown
 
 
@@ -707,12 +923,12 @@ CASES = [
     ("drawer state never announced", "assets/js/main.js",
      "    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');\n", "",
      "never updates aria-expanded", None, "finding"),
-    # 锚在 FEATURE 那一组：它前面是 h2 区块标题，改成 h5 才真的构成跳级。
+    # 锚在 PRINCIPAL 那一组：它前面是 h2 区块标题，改成 h5 才真的构成跳级。
     # （后面那几组的 h3 前面已经排着 h4 卡名，h4->h5 不算 skip，锚在那儿等于没测。）
     ("heading skip", "index.html",
-     '<h3 class="pg-head mono"><span class="pg-label">FEATURE · 最受关注</span>'
+     '<h3 class="pg-head mono"><span class="pg-label">PRINCIPAL · 主打</span>'
      '<span class="pg-rule" aria-hidden="true"></span><span class="pg-count">01</span></h3>',
-     '<h5 class="pg-head mono"><span class="pg-label">FEATURE · 最受关注</span>'
+     '<h5 class="pg-head mono"><span class="pg-label">PRINCIPAL · 主打</span>'
      '<span class="pg-rule" aria-hidden="true"></span><span class="pg-count">01</span></h5>',
      "heading jumps", None, "finding"),
     ("og size mismatch", "index.html", 'og:image:width" content="1200"',
@@ -728,6 +944,48 @@ CASES = [
     ("malformed ListItem must be a finding, not a crash", "index.html",
      '"item": {', '"items": {',
      "carries no object-valued 'item'", None, "finding"),
+    # 排名榜的三条：顺序、名次编号、开关计数，都是纯静态就能判的
+    ("star ranking claim broken", "index.html", "精选清单 · 10★", "精选清单 · 1★",
+     "ordered by stars", None, "finding"),
+    ("rank badge out of order", "index.html", '<i class="pc-rank">05</i>',
+     '<i class="pc-rank">09</i>', "rank badges", None, "finding"),
+    ("filter chip count drift", "index.html", "AI · 音乐 <b>02</b>",
+     "AI · 音乐 <b>07</b>", "filter chip", None, "finding"),
+    ("npm download claim removed", "index.html", "累计 <b>54,347</b> 次下载",
+     "很多人装", "gone blind", None, "finding"),
+    ("npm cumulative claim overstated", "index.html", "累计 <b>54,347</b> 次下载",
+     "累计 <b>9,999,999</b> 次下载", "overstates the total", "npm", "finding"),
+    ("npm cumulative claim left behind", "index.html", "累计 <b>54,347</b> 次下载",
+     "累计 <b>1,000</b> 次下载", "behind", "npm", "finding"),
+    # 这一组测的是「检查本身会不会变瞎」：每条都制造一个盲区或一处自相矛盾，
+    # 而矛盾恰好落在刚加固过的那几条守卫上（pg-count / 名次徽章 / ★ 徽章 / ItemList 顺序）。
+    ("RANKED head count drift", "index.html", '<span class="pg-count">08</span>',
+     '<span class="pg-count">07</span>', "RANKED head counts", None, "finding"),
+    ("a card loses its rank badge", "index.html", '<i class="pc-rank">05</i>',
+     '<i class="pc-place">05</i>', "every card must carry", None, "finding"),
+    ("star badge written in a way nobody can read", "index.html",
+     '<i class="pc-rank">09</i>● 数据小品 · 0★',
+     '<i class="pc-rank">09</i>● 数据小品 · 200+★', "cannot parse", None, "finding"),
+    ("structured data says ascending", "index.html", "ItemListOrderDescending",
+     "ItemListOrderAscending", "itemListOrder", None, "finding"),
+    ("ListItem position swapped", "index.html", '"position": 2,', '"position": 3,',
+     "ItemList positions", None, "finding"),
+    ("filter chip that hides everything", "index.html",
+     'data-filter="hardware" aria-pressed="false">开源硬件 <b>01</b>',
+     'data-filter="gaming" aria-pressed="false">游戏模组 <b>00</b>',
+     "matches no card", None, "finding"),
+    ("stat strip counter drifts from the card count", "index.html",
+     '<li><b data-count="9">9</b><span class="mono">精选项目</span></li>',
+     '<li><b data-count="12">12</b><span class="mono">精选项目</span></li>',
+     "the stat strip says 12", None, "finding"),
+    ("stat strip counter renamed out of reach", "index.html",
+     '<li><b data-count="9">9</b><span class="mono">精选项目</span></li>',
+     '<li><b data-count="9">9</b><span class="mono">个仓库</span></li>',
+     "no 项目 counter", None, "finding"),
+    ("stat strip text and count-up disagree", "index.html",
+     '<li><b data-count="9">9</b><span class="mono">精选项目</span></li>',
+     '<li><b data-count="9">7</b><span class="mono">精选项目</span></li>',
+     "counts up to", None, "finding"),
 ]
 
 
@@ -743,6 +1001,10 @@ def probe(dep):
         return fetch(YUE_README)[0] == 200
     if dep == "pages":
         return last_modified("https://revolutionla.github.io/")[0] == 200
+    if dep == "npm":
+        # 累计值的判定来自区间端点，不是 registry：registry 答 200 而区间端点被限流，
+        # 这一轮仍然没有看到下载量。probe 必须问那个真正决定结论的 URL。
+        return fetch(NPM_FIRST_CHUNK)[0] == 200
     return True
 
 
@@ -918,7 +1180,8 @@ def _unit_probe_asks_the_endpoint_that_matters():
     global fetch
     saved = fetch
     deps = {"github": "https://github.com/RevolutionLA/adversarial-review",
-            "raw": YUE_README}
+            "raw": YUE_README,
+            "npm": NPM_FIRST_CHUNK}
     try:
         for dep, url in deps.items():
             for code, want in ((200, True), (403, False), (429, False)):

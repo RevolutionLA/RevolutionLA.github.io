@@ -5,8 +5,10 @@
    三条硬规矩
      1. 任何动画都要给 prefers-reduced-motion 一条静态出路（不是「删掉」，
         而是「渲染成最终态」）。
-     2. 所有绘制走一个 rAF 循环；页面不可见、或画布不在视口内时停表。
+     2. 所有绘制走一个 rAF 循环：页面不可见就停表，示波画面不在视口内就停表，
+        常驻背景静置四秒后降半速——任何输入立刻回到满帧。
      3. JS 缺席时页面必须完整可读：装饰件（光标/示波器/开机）自行隐身。
+     4. 系统偏好可以在页面开着的时候改，所以「减少动效」是活的监听，不是加载时的一次快照。
    ============================================================ */
 
 (function () {
@@ -25,7 +27,8 @@
     var raf = null;
     var last = 0;
     function loop(ts) {
-      var dt = Math.min(48, ts - last || 16);
+      /* 时间戳理论上单调递增，但一旦倒了一次，负的 dt 会把所有阻尼变成放大 */
+      var dt = Math.max(1, Math.min(48, ts - last || 16));
       last = ts;
       for (var i = jobs.length - 1; i >= 0; i--) {
         if (jobs[i](ts, dt) === false) jobs.splice(i, 1);
@@ -52,8 +55,23 @@
   })();
 
   doc.addEventListener('visibilitychange', function () {
-    if (doc.hidden) ticker.stop(); else ticker.start();
+    if (doc.hidden) { ticker.stop(); return; }
+    ticker.start();
+    /* 后台标签页的 setInterval 会被节流到约一分钟一次：
+       这块表写的是「成都此刻」，回到前台必须立刻补一跳，不能带着旧读数示人。 */
+    tickClock();
   });
+
+  /* 「减少动效」是访客可以在页面开着的时候改的系统设置，所以这条承诺不能只在
+     加载那一刻成立。各动画回路把自己的重算函数挂到 motionHooks 上，这里统一通知。 */
+  var motionHooks = [];
+  var mqReduce = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  if (mqReduce && mqReduce.addEventListener) {
+    mqReduce.addEventListener('change', function () {
+      reduced = mqReduce.matches;
+      for (var i = 0; i < motionHooks.length; i++) motionHooks[i](reduced);
+    });
+  }
 
   /* ==========================================================
      1 · 时钟（成都 = UTC+8，不依赖访客本机时区）
@@ -144,62 +162,311 @@
   }
 
   /* ==========================================================
-     4 · 星野（三层视差 + 呼吸）
+     4 · 信号粒子场（全站常驻 · 指针斥流 / 点击冲击波 / 滚动充能）
+     整站只有一张背景 canvas、一条 rAF 回路（挂在 ticker 上，
+     后台标签页自动停表）。粒子读作面板里的「载流子」：
+     静止时沿流场缓慢漂移，被指针或冲击波扰动就带上电荷 q，
+     q 用颜色（蓝白→信号绿→琥珀余辉）、拖尾和一层廉价光晕表达。
+     不用 shadowBlur、不用全屏滤镜——那是掉帧的头号来源。
      ========================================================== */
-  (function starfield() {
-    var cv = doc.getElementById('starfield');
+  (function signalField() {
+    var cv = doc.getElementById('field');
     var ctx = cv && cv.getContext && cv.getContext('2d');
     if (!ctx) return;
-    var w = 0, h = 0, dpr = 1, stars = [], scrollY = 0;
 
+    var coarse = !fine;                 /* 触摸设备没有 hover：只留点击脉冲 */
+    var w = 0, h = 0, dpr = 1;
+    var parts = [], waves = [];
+    var target = 0, tuned = 0;
+    var T = 0, ema = 16;
+    var P = { x: -1e4, y: -1e4, vx: 0, vy: 0, on: false };
+    var kick = 0, lastY = 0;
+    /* 静置降速：4 秒没人碰它，就隔帧再算。漂移本身很慢，半速看不出来，
+       但一整块全屏合成层少画一半的帧——这是常驻背景唯一实在的省电法。
+       任何指针、点击、滚动、缩放输入都把帧率立刻拉回来。 */
+    var lastAct = 0, lastMove = -1e4, acc = 0;
+
+    function mk() {
+      var depth = [0.35, 0.7, 1.15][Math.floor(Math.random() * 3)];
+      return {
+        x: Math.random() * w, y: Math.random() * h,
+        vx: (Math.random() - 0.5) * 0.05, vy: (Math.random() - 0.5) * 0.05,
+        depth: depth,
+        r: (0.45 + depth * 0.9) * (0.6 + Math.random() * 0.8),
+        a: (0.05 + depth * 0.26) * (0.55 + Math.random() * 0.6),
+        ph: Math.random() * 6.2832,
+        sp: 0.0009 + Math.random() * 0.0026,
+        q: 0
+      };
+    }
+    function fit(n) {
+      while (parts.length < n) parts.push(mk());
+      if (parts.length > n) parts.length = n;
+    }
+    /* 粒子数按视口面积给，触摸端和小核机器再砍一刀 */
+    function budget() {
+      var n = Math.round((w * h) / 13000);
+      n = Math.max(58, Math.min(n, coarse ? 88 : 172));
+      if ((navigator.hardwareConcurrency || 8) <= 4) n = Math.round(n * 0.7);
+      return n;
+    }
     function build() {
+      var nw = doc.documentElement.clientWidth || window.innerWidth;
+      var nh = doc.documentElement.clientHeight || window.innerHeight;
+      if (!nw || !nh) return;              /* 0x0 会把所有粒子焊死在左上角 */
+      w = nw; h = nh;
       dpr = Math.min(window.devicePixelRatio || 1, 2);
-      w = doc.documentElement.clientWidth || window.innerWidth;
-      h = doc.documentElement.clientHeight || window.innerHeight;
-      cv.width = Math.round(w * dpr);
-      cv.height = Math.round(h * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      var n = Math.min(Math.round(Math.min(w, 1600) * 0.055), 130);
-      stars = [];
-      for (var i = 0; i < n; i++) {
-        var layer = i % 3;
-        stars.push({
-          x: Math.random() * w,
-          y: Math.random() * h,
-          r: [0.5, 0.9, 1.5][layer] * (0.6 + Math.random() * 0.8),
-          a: [0.16, 0.3, 0.5][layer] * (0.5 + Math.random() * 0.7),
-          par: [0.02, 0.05, 0.1][layer],
-          tw: Math.random() * 6.28,
-          sp: 0.0008 + Math.random() * 0.0026,
-          green: Math.random() < 0.07
-        });
+      /* 给 canvas.width 赋同一个值同样会清空位图，所以尺寸真变了才动它 */
+      var bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+      if (cv.width !== bw || cv.height !== bh) {
+        cv.width = bw; cv.height = bh;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+      target = budget();
+      fit(target);
+      /* 视口变小时被留在框外的粒子重新撒开，而不是整块挤到边缘排队 */
+      for (var i = 0; i < parts.length; i++) {
+        if (parts[i].x > w || parts[i].y > h) {
+          parts[i].x = Math.random() * w;
+          parts[i].y = Math.random() * h;
+        }
+      }
+    }
+    function pulse(x, y) {
+      if (waves.length > 3) waves.shift();
+      waves.push({ x: x, y: y, age: 0, r: 0, life: 1, dur: 900 });
+    }
+
+    function step(ts, dt) {
+      acc += dt;
+      if (ts - lastAct > 4000 && acc < 33) return true;   /* 静置：这一帧不画 */
+      dt = Math.min(48, acc);
+      acc = 0;
+      var k = dt / 16.6667;                       /* 归一化步长：掉帧时动作不失真 */
+      T += dt;
+      ctx.clearRect(0, 0, w, h);
+      if (P.on && ts - lastMove > 900) P.on = false;  /* 光标停住不等于一直在搅动 */
+
+      for (var wi = waves.length - 1; wi >= 0; wi--) {
+        var W0 = waves[wi];
+        W0.age += dt;
+        W0.r = W0.age * 0.62;
+        W0.life = W0.age < W0.dur ? 1 - W0.age / W0.dur : 0;
+        if (!W0.life) waves.splice(wi, 1);
+      }
+
+      /* 指针速度只用于算「搅动」强度：P.vx 是上一帧的位移，除以 k 才是
+         「每 16.7ms 的位移」，否则 30fps 下搅动会强一倍。 */
+      var spd = Math.min(1, (Math.abs(P.vx) + Math.abs(P.vy)) / (46 * k));
+      var swirl = spd * 0.5;
+      P.vx *= Math.pow(0.72, k); P.vy *= Math.pow(0.72, k);
+      kick *= Math.pow(0.9, k);
+
+      var R = 168, RI = 268, i, p;
+      for (i = 0; i < parts.length; i++) {
+        p = parts[i];
+
+        /* 1 · 流场：两条不同频率的正弦叠加，慢且没有明显周期 */
+        var ang = (Math.sin(p.y * 0.0042 + T * 0.00021) + Math.cos(p.x * 0.0037 - T * 0.00017)) * 1.9;
+        p.vx += Math.cos(ang) * 0.0032 * p.depth * k;
+        p.vy += Math.sin(ang) * 0.0032 * p.depth * k;
+
+        /* 2 · 指针：内圈斥开并绕切向，外圈轻微吸回来，形成一圈悬尘 */
+        if (P.on) {
+          var dx = p.x - P.x, dy = p.y - P.y;
+          var d2 = dx * dx + dy * dy;
+          if (d2 < RI * RI) {
+            var d = Math.sqrt(d2) || 1, ux = dx / d, uy = dy / d;
+            if (d < R) {
+              var f = 1 - d / R; f *= f;
+              p.vx += (ux * 0.6 - uy * swirl) * f * k;
+              p.vy += (uy * 0.6 + ux * swirl) * f * k;
+              p.q += f * 0.11 * k;
+            } else {
+              var g = (1 - (d - R) / (RI - R)) * 0.05;
+              p.vx -= ux * g * k; p.vy -= uy * g * k;
+              p.q += g * 0.4 * k;
+            }
+          }
+        }
+
+        /* 3 · 冲击波：落在环带里的粒子被径向外推并点亮 */
+        for (var wn = 0; wn < waves.length; wn++) {
+          var W = waves[wn];
+          var wx = p.x - W.x, wy = p.y - W.y;
+          var wd = Math.sqrt(wx * wx + wy * wy) || 1;
+          var band = Math.abs(wd - W.r);
+          if (band < 46) {
+            var wf = (1 - band / 46) * W.life;
+            p.vx += (wx / wd) * 1.15 * wf * k;
+            p.vy += (wy / wd) * 1.15 * wf * k;
+            p.q += wf * 0.45 * k;
+          }
+        }
+
+        /* 4 · 滚动：整场沿滚动反方向被拖一下，速度越快充能越多。
+           kick 已经是「这一帧滚了多少」，再乘 k 就变成 ∝dt²，低帧率会过冲。 */
+        p.vy += kick * p.depth;
+        p.q += Math.min(0.02, Math.abs(kick) * 0.05);
+
+        /* 5 · 阻尼、积分、环绕 */
+        var damp = Math.pow(0.985, k);
+        p.vx *= damp; p.vy *= damp;
+        p.x += p.vx * k * 2.2; p.y += p.vy * k * 2.2;
+        if (p.x < -8) p.x = w + 7; else if (p.x > w + 8) p.x = -7;
+        if (p.y < -8) p.y = h + 7; else if (p.y > h + 8) p.y = -7;
+        p.q *= Math.pow(0.945, k);
+        if (p.q > 1) p.q = 1;
+        p.ph += p.sp * dt;
+
+        draw(p);
+      }
+
+      for (i = 0; i < waves.length; i++) {
+        var RW = waves[i];
+        ctx.strokeStyle = 'rgba(52,240,160,' + (RW.life * 0.15).toFixed(3) + ')';
+        ctx.lineWidth = 1 + RW.life * 1.3;
+        ctx.beginPath();
+        ctx.arc(RW.x, RW.y, RW.r, 0, 6.2832);
+        ctx.stroke();
+      }
+
+      /* 6 · 自适应画质：帧时间持续偏高就减粒子，宽裕再长回去 */
+      ema += (dt - ema) * 0.05;
+      if (++tuned > 120) {
+        tuned = 0;
+        if (ema > 26 && parts.length > 46) { fit(Math.max(46, Math.round(parts.length * 0.8))); ema = 16; }
+        else if (ema < 13.5 && parts.length < target) fit(Math.min(target, parts.length + 8));
+      }
+      return true;
+    }
+
+    function draw(p) {
+      var tw = 0.66 + 0.34 * Math.sin(p.ph);
+      var a = Math.min(0.95, p.a * tw + p.q * 0.5);
+      var m = Math.min(1, p.q * 1.6);
+      var cr = 226 + (52 - 226) * m, cg = 236 + (240 - 236) * m, cb = 246 + (160 - 246) * m;
+      if (p.q > 0.55) {                       /* 电荷顶格时往琥珀偏，像被烧了一下 */
+        cr += (242 - cr) * 0.4; cg += (178 - cg) * 0.4; cb += (76 - cb) * 0.4;
+      }
+      var col = 'rgba(' + (cr | 0) + ',' + (cg | 0) + ',' + (cb | 0) + ',' + a.toFixed(3) + ')';
+      var spd = Math.abs(p.vx) + Math.abs(p.vy);
+      if (spd > 0.2 || p.q > 0.22) {          /* 动起来才拖尾，静止时是干净的点 */
+        ctx.strokeStyle = col;
+        ctx.lineWidth = p.r * 0.9;
+        ctx.beginPath();
+        ctx.moveTo(p.x - p.vx * 7, p.y - p.vy * 7);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, 6.2832);
+        ctx.fill();
+      }
+      if (p.q > 0.18) {
+        ctx.fillStyle = 'rgba(52,240,160,' + (p.q * 0.085).toFixed(3) + ')';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r * 4.2, 0, 6.2832);
+        ctx.fill();
       }
     }
 
-    function paint(ts) {
+    function still() {
       ctx.clearRect(0, 0, w, h);
-      for (var i = 0; i < stars.length; i++) {
-        var s = stars[i];
-        var a = reduced ? s.a : s.a * (0.62 + 0.38 * Math.sin(s.tw));
-        var y = s.y - (scrollY * s.par) % h;
-        if (y < -4) y += h;
-        ctx.beginPath();
-        ctx.arc(s.x, y, s.r, 0, 6.2832);
-        ctx.fillStyle = s.green
-          ? 'rgba(52,240,160,' + (a * 0.9).toFixed(3) + ')'
-          : 'rgba(226,236,246,' + a.toFixed(3) + ')';
-        ctx.fill();
-        if (!reduced) s.tw += s.sp * 16;
-      }
+      for (var i = 0; i < parts.length; i++) draw(parts[i]);
     }
 
     build();
-    window.addEventListener('resize', function () { build(); if (reduced) paint(); }, { passive: true });
-    window.addEventListener('scroll', function () { scrollY = window.scrollY || 0; }, { passive: true });
 
-    if (reduced) { paint(); }
-    else {
-      ticker.add(function (ts) { paint(ts); });
+    /* rAF 的 ts 和 performance.now() 同一个时间原点，事件 timeStamp 也是 */
+    function stamp(e) { return (e && e.timeStamp) || performance.now(); }
+
+    var rt = null;
+    window.addEventListener('resize', function () {
+      /* 手机地址栏收起会连发 resize，每次都重建位图就是白烧一次显存 */
+      if (rt) return;
+      rt = setTimeout(function () {
+        rt = null; build(); lastAct = performance.now(); if (reduced) still();
+      }, 160);
+    }, { passive: true });
+
+    window.addEventListener('pointermove', function (e) {
+      if (reduced || coarse) return;        /* 触屏没有悬停：那一下不该被当成「移动扰动」 */
+      var t = stamp(e);
+      /* 第一次出现（或停住后又动）只记位置：否则 P.vx 会吃进一个上万的假位移，
+         搅动强度直接顶格，画面像被抽了一下。 */
+      if (P.on && t - lastMove < 900) {
+        P.vx += e.clientX - P.x; P.vy += e.clientY - P.y;
+      } else {
+        P.vx = P.vy = 0;
+      }
+      P.x = e.clientX; P.y = e.clientY; P.on = true;
+      lastMove = t; lastAct = t;
+    }, { passive: true });
+    window.addEventListener('pointerout', function (e) {
+      if (!e.relatedTarget) P.on = false;
+    }, { passive: true });
+    window.addEventListener('pointerdown', function (e) {
+      if (reduced) return;
+      pulse(e.clientX, e.clientY);          /* 触摸端唯一的互动入口，点击必须有反馈 */
+      lastAct = stamp(e);
+    }, { passive: true });
+    lastY = window.scrollY || 0;
+    window.addEventListener('scroll', function () {
+      var y = window.scrollY || 0;
+      kick = Math.max(-0.5, Math.min(0.5, -(y - lastY) * 0.012));
+      lastY = y;
+      if (!reduced) lastAct = performance.now();
+    }, { passive: true });
+
+    /* 让访客知道这一层是活的。竖排在那道右侧沟槽里（CSS 只在 ≥1024 显示），不压正文；
+       触屏上「移动以扰动」是假话，所以只在精确指针下挂出来。
+       碰一次、滚出首屏、12 秒无人理都退场，并且把自己的监听和计时器一并摘掉。 */
+    var hint = doc.getElementById('field-hint');
+    var hintTimer = null;
+    function hintScroll() {
+      if ((window.scrollY || 0) > window.innerHeight * 0.6) retireHint();
+    }
+    function retireHint() {
+      if (!hint || !hint.classList.contains('is-armed')) return;
+      hint.classList.add('is-off');
+      window.removeEventListener('pointerdown', retireHint);
+      window.removeEventListener('scroll', hintScroll);
+      if (hintTimer) { clearTimeout(hintTimer); hintTimer = null; }
+    }
+    function armHint() {
+      if (!hint || !fine || innerWidth < 1024 || reduced) return;
+      if (hint.classList.contains('is-off')) return;   /* 只说一次，不追着人重复 */
+      hint.classList.add('is-armed');
+      window.addEventListener('pointerdown', retireHint, { passive: true });
+      window.addEventListener('scroll', hintScroll, { passive: true });
+      hintTimer = setTimeout(retireHint, 12000);
+    }
+
+    var running = false;
+    function setMotion(on) {
+      if (on === running) return;
+      running = on;
+      if (on) { acc = 0; lastAct = performance.now(); ticker.add(step); }
+      else { ticker.remove(step); still(); }
+    }
+
+    if (reduced) still();                     /* 减少动效：一屏静止微尘，一帧都不画 */
+    else { setMotion(true); armHint(); }
+
+    motionHooks.push(function (off) { setMotion(!off); if (off) retireHint(); else armHint(); });
+
+    /* 指针类型同样可以中途变（触屏笔记本插上鼠标）：档位和提示跟着重算 */
+    var mqFine = window.matchMedia ? window.matchMedia('(hover: hover) and (pointer: fine)') : null;
+    if (mqFine && mqFine.addEventListener) {
+      mqFine.addEventListener('change', function () {
+        fine = mqFine.matches; coarse = !fine;
+        P.on = false;
+        build();
+        if (fine) armHint(); else retireHint();
+        if (reduced) still();
+      });
     }
   })();
 
@@ -327,6 +594,11 @@
 
     if (reduced) { frame(0, 16); frame(0, 16); }
     else ticker.add(frame);
+    /* 这块表也得听得见系统偏好的变化：关掉时摘掉回路，别只是「看起来不动」 */
+    motionHooks.push(function (off) {
+      if (off) { ticker.remove(frame); frame(0, 16); frame(0, 16); }
+      else ticker.add(frame);
+    });
   })();
 
   /* ==========================================================
@@ -335,8 +607,9 @@
   var REVEALS = [
     ['.hero-strip', 0], ['.hero-title', 60], ['.hero-lower', 220], ['.scroll-cue', 520],
     ['.sec-head', 0], ['.about-main > *', 0], ['.about-side', 120],
-    ['.stack-card', 0], ['.proj-group', 0], ['.tl-item', 0], ['.sig-card', 0],
-    ['.contact-inner', 0], ['.filters', 0]
+    ['.stack-card', 0], ['.proj-group', 0], ['.proj-rest .project-card', 0],
+    ['.tl-item', 0], ['.sig-card', 0],
+    ['.contact-inner', 0], ['.proj-rest-head', 0]
   ];
   function armReveals() {
     if (!('IntersectionObserver' in window)) return;
@@ -467,6 +740,11 @@
       if (label) label.style.transform = 'translate3d(' + (rx + 20) + 'px,' + (ry + 18) + 'px,0)';
     }
     ticker.add(loop);
+    /* 关掉动效时连自定义游标一起交还：光标必须回到系统那只，而不是只停住环 */
+    motionHooks.push(function (off) {
+      if (off) { ticker.remove(loop); root.classList.remove('has-cursor'); }
+      else { root.classList.add('has-cursor'); ticker.add(loop); }
+    });
 
     var HOT = 'a, button, .project-card, .stack-card, .chip, input, textarea';
     doc.addEventListener('pointerover', function (e) {
@@ -551,25 +829,40 @@
   })();
 
   /* ==========================================================
-     10 · 项目分区筛选
+     10 · 分类筛选（卡片级）
      ========================================================== */
   (function filters() {
     var chips = [].slice.call(doc.querySelectorAll('.chip[data-filter]'));
-    var groups = [].slice.call(doc.querySelectorAll('.proj-group[data-group]'));
-    if (!chips.length || !groups.length) return;
+    /* 范围限定在 .proj-rest 之内：主打卡（.flagship）不参与筛选，
+       不然点一下「AI · 音乐」会把最重要的那张卡一起藏掉。 */
+    var cards = [].slice.call(doc.querySelectorAll('.proj-rest .project-card[data-cat]'));
+    var status = doc.querySelector('.filt-status b');
+    if (!chips.length || !cards.length) return;
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
     chips.forEach(function (chip) {
       chip.addEventListener('click', function () {
         var f = chip.getAttribute('data-filter');
+        var shown = 0;
         chips.forEach(function (c) {
           var on = c === chip;
           c.classList.toggle('is-on', on);
           c.setAttribute('aria-pressed', on ? 'true' : 'false');
         });
-        groups.forEach(function (g) {
-          var show = f === 'all' || g.getAttribute('data-group') === f;
-          g.classList.toggle('is-hidden', !show);
-          if (show) g.classList.add('in-view');
+        cards.forEach(function (card) {
+          var show = f === 'all' || card.getAttribute('data-cat') === f;
+          card.classList.toggle('is-hidden', !show);
+          /* 被筛出来的卡可能从没进过视口，reveal 还停在 opacity:0：
+             既然现在要给它看，就直接落到终态。 */
+          if (show) { shown++; card.classList.add('in-view'); }
         });
+        /* 筛选改了屏幕上还剩几张，这件事必须说出来，而不只是「看起来变了」 */
+        if (status) {
+          var cnt = chip.querySelector('b');
+          var label = cnt ? chip.textContent.replace(cnt.textContent, '').trim() : f;
+          status.textContent = f === 'all'
+            ? '全部 ' + pad(shown) + ' 个'
+            : label + ' · ' + pad(shown) + ' 个';
+        }
       });
     });
   })();

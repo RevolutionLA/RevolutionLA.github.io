@@ -116,9 +116,9 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* ============================================================
-   背景层：星野 / 机箱网格 / 颗粒
+   背景层：信号粒子场 / 机箱网格 / 颗粒
    ============================================================ */
-#starfield {
+#field {
   position: fixed;
   inset: 0;
   width: 100%;
@@ -126,6 +126,33 @@ a { color: inherit; text-decoration: none; }
   z-index: 0;
   pointer-events: none;
 }
+/* 粒子场的「这一层是活的」提示。
+   它原先 fixed 在左下角，滚动起来会直接压在卡片标题上——固定元素压正文
+   是排版事故，不是氛围。现在把它竖排进右侧那道面板缝里，像机箱侧面的丝印：
+   那里在宽屏上是真正的空白沟槽，永远不会和正文抢地方；窄屏沟槽没了，就干脆不出现。 */
+.field-hint {
+  display: none;
+  position: fixed;
+  right: 16px;
+  bottom: 30px;
+  z-index: 4;
+  writing-mode: vertical-rl;
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: var(--ink-faint);
+  pointer-events: none;
+  opacity: 0.92;
+  transition: opacity 0.9s var(--ease);
+}
+.field-hint i { font-style: normal; }
+.field-hint i:first-child { color: var(--signal); }
+.field-hint i + i { margin-top: 11px; }
+.js .field-hint.is-armed { display: none; }
+.field-hint.is-off { opacity: 0; }
+@media (min-width: 1024px) {
+  .js .field-hint.is-armed { display: block; }
+}
+
 .chassis {
   position: fixed;
   inset: 0;
@@ -628,6 +655,34 @@ html.has-cursor .cur-dot { margin: -2.5px 0 0 -2.5px; }
 .hero-facts li { display: inline-flex; align-items: center; gap: 8px; }
 .hero-facts span { color: var(--ink-faint); letter-spacing: 0.2em; font-size: 10px; }
 
+/* 主打通道：首屏就把最重要的那个项目递到眼前，而不是等访客滚到 04 区 */
+.hero-prime {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  width: fit-content;
+  margin-top: 22px;
+  padding: 9px 14px;
+  border: 1px solid var(--stroke-2);
+  border-radius: 2px;
+  background: rgba(52, 240, 160, 0.045);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--ink-dim);
+  transition: border-color 0.35s, background-color 0.35s, color 0.35s;
+}
+.hero-prime:hover, .hero-prime:focus-visible {
+  border-color: rgba(52, 240, 160, 0.5);
+  background: rgba(52, 240, 160, 0.085);
+  color: var(--ink);
+  outline: none;
+}
+.hp-tag { font-size: 9px; letter-spacing: 0.22em; color: var(--signal); }
+.hp-name { font-size: 12px; letter-spacing: 0; color: var(--ink); white-space: nowrap; }
+.hp-note { color: var(--ink-faint); white-space: nowrap; }
+.hero-prime .ico { transition: transform 0.35s var(--ease); }
+.hero-prime:hover .ico, .hero-prime:focus-visible .ico { transform: translateX(4px); }
+
 /* ---------- 示波器 ---------- */
 .scope-panel { overflow: hidden; }
 .scope-screen {
@@ -775,6 +830,15 @@ html.has-cursor .cur-dot { margin: -2.5px 0 0 -2.5px; }
   max-width: 42ch;
   padding-bottom: 0.3em;
 }
+/* 排名依据要给出可核对的出处，而不是让访客对着 ★ 猜 */
+.sn-link {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--stroke-2);
+  padding-bottom: 1px;
+  transition: color 0.3s var(--ease), border-color 0.3s var(--ease);
+}
+.sn-link:hover, .sn-link:focus-visible { color: var(--signal); border-color: var(--signal); }
 
 /* ============================================================
    ABOUT
@@ -957,7 +1021,13 @@ html.has-cursor .cur-dot { margin: -2.5px 0 0 -2.5px; }
 /* ============================================================
    PROJECTS
    ============================================================ */
-.filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: clamp(30px, 4vh, 48px); }
+/* 分类开关是 JS 功能：没有脚本时它们必须整排消失，
+   而不是留下六个按下去什么都不会发生的按钮。卡片本身不受影响，全都在。 */
+.filters { display: none; flex-wrap: wrap; gap: 8px; margin-bottom: clamp(30px, 4vh, 48px); }
+.js .filters { display: flex; }
+.filt-status { display: none; margin-top: 14px; font-size: 10px; letter-spacing: 0.18em; color: var(--ink-faint); }
+.js .filt-status { display: block; }
+.filt-status b { font-weight: 400; color: var(--signal); }
 .chip {
   display: inline-flex;
   align-items: center;
@@ -994,6 +1064,14 @@ html.has-cursor .cur-dot { margin: -2.5px 0 0 -2.5px; }
 .pg-rule { flex: 1; height: 1px; background: linear-gradient(90deg, var(--stroke), transparent); }
 .pg-count { color: var(--signal); }
 
+/* 其余项目：筛选开关只作用于这一区，主打卡永远留在上面 */
+.proj-rest { margin-top: clamp(46px, 6.5vh, 84px); }
+.proj-rest-head .pg-head { margin-bottom: 22px; }
+.proj-rest-head .filters { margin-bottom: 0; }
+.proj-rest .projects-grid { margin-top: clamp(26px, 3.6vh, 42px); }
+/* 筛选是卡片级隐藏：被藏起来的卡不参与网格，也不会留下空槽 */
+.project-card.is-hidden { display: none; }
+
 .projects-grid {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
@@ -1029,6 +1107,12 @@ html.has-cursor .cur-dot { margin: -2.5px 0 0 -2.5px; }
   box-shadow: var(--panel-hi), 0 30px 60px -34px rgba(0, 0, 0, 0.95), 0 0 30px var(--signal-dim);
   outline: none;
 }
+/* 键盘焦点必须和鼠标悬停看得出区别：整张卡片的悬停态是「抬起来」，
+   焦点额外给一圈信号绿描边，只用键盘的人才知道自己在哪一格。 */
+.project-card:focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: 4px;
+}
 .project-card:hover::after, .project-card:focus-visible::after { opacity: 1; }
 .project-card > * { position: relative; z-index: 1; }
 
@@ -1051,10 +1135,48 @@ html.has-cursor .cur-dot { margin: -2.5px 0 0 -2.5px; }
 .project-card[data-size="wide"]:hover .pc-art { opacity: 0.72; transform: translateY(-52%); }
 
 .pc-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
   font-size: 10px;
   letter-spacing: 0.18em;
   color: var(--signal);
   margin-bottom: 16px;
+}
+/* 名次：star 数从高到低的序号，跟着卡走，筛选时不会错位 */
+.pc-rank {
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--signal);
+  border: 1px solid rgba(52, 240, 160, 0.3);
+  border-radius: 2px;
+  padding: 1px 5px;
+  background: rgba(52, 240, 160, 0.06);
+}
+/* npm 安装量：页面上唯一一个「别人到底在用不用」的硬读数，用琥珀色和 star 区分开 */
+.pc-dl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -6px 0 18px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+.pc-dl b {
+  font-weight: 500;
+  color: var(--amber);
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.pc-dl-k {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--amber);
+  border: 1px solid rgba(242, 178, 76, 0.34);
+  border-radius: 2px;
+  padding: 1px 5px;
 }
 .pc-name {
   font-family: var(--display);
@@ -1101,6 +1223,42 @@ html.has-cursor .cur-dot { margin: -2.5px 0 0 -2.5px; }
 .pc-link .ico { transition: transform 0.4s var(--ease); }
 .project-card:hover .pc-link { color: var(--signal); }
 .project-card:hover .pc-link .ico { transform: translateX(5px); }
+
+/* ---------- 主通道：dsh-dream-skin ----------
+   它不参与筛选，也必须在分量上压过其余卡：更大的名字、更亮的边框、
+   左缘一条从信号色褪到透明的竖边，读作「这一路是通的」。
+   选择器一律带 .project-card：通栏卡本就有 (0,2,0) 的字号规则，
+   只写 .flagship .pc-name 会被它压掉。 */
+.flagship { margin-top: clamp(26px, 3.6vh, 42px); }
+.flagship .pg-label { color: var(--ink-dim); }
+.flagship .project-card {
+  min-height: clamp(330px, 42vh, 430px);
+  padding: clamp(30px, 3.2vw, 50px) clamp(28px, 3.6vw, 56px) clamp(26px, 2.8vw, 44px);
+  padding-left: clamp(36px, 3.8vw, 60px);
+  border-color: rgba(52, 240, 160, 0.26);
+  background:
+    linear-gradient(150deg, rgba(52, 240, 160, 0.07) 0%, transparent 42%),
+    linear-gradient(170deg, var(--space-2) 0%, var(--space-1) 62%);
+  box-shadow: var(--panel-hi), 0 0 46px rgba(52, 240, 160, 0.05);
+}
+.flagship .project-card::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--signal), rgba(52, 240, 160, 0.06));
+}
+.flagship .project-card:hover, .flagship .project-card:focus-visible {
+  border-color: rgba(52, 240, 160, 0.5);
+  box-shadow: var(--panel-hi), 0 30px 60px -34px rgba(0, 0, 0, 0.95), 0 0 40px var(--signal-dim);
+}
+.flagship .pc-status { font-size: 11px; letter-spacing: 0.2em; }
+.flagship .project-card[data-size="wide"] .pc-name { font-size: clamp(34px, 4.9vw, 66px); }
+.flagship .project-card[data-size="wide"] .pc-desc {
+  font-size: 15.5px;
+  max-width: min(52%, 640px);
+}
+.flagship .project-card[data-size="wide"] .pc-art { opacity: 0.26; }
 
 /* ============================================================
    TRACE · 轨迹
@@ -1389,6 +1547,9 @@ a:focus-visible, button:focus-visible {
   .ht-mark b { font-size: 8px; }
   .ht-mark i { font-size: 7px; }
   .hero-motto { max-width: none; font-size: 22px; }
+  /* 主打入口那条在 390 宽里排不下整行：备注允许换到第二行，项目名仍不折断 */
+  .hero-prime { width: 100%; flex-wrap: wrap; gap: 6px 11px; }
+  .hp-note { white-space: normal; }
   .sec-head { grid-template-columns: 40px minmax(0, 1fr); gap: 16px; }
   .stat-strip { grid-template-columns: 1fr; }
   .contact-body { padding: 26px 20px; }
@@ -1398,7 +1559,24 @@ a:focus-visible, button:focus-visible {
   .mail-btn { font-size: 11.5px; gap: 7px; }
   /* 窄屏没有右半区的空白给装饰图：让它退到文字背后当水印，别压在字上 */
   .pc-art { width: 64px; opacity: 0.1; z-index: 0; }
+  /* 通栏卡那条得写得一样重才压得住：.flagship .project-card[data-size=wide] .pc-art
+     是 (0,4,0)，只写 .pc-art 会被它顶回去，装饰图于是又骑回正文上——
+     窄屏没有右侧留白，就把它收到右下角那一小块真空里。 */
+  .project-card[data-size="wide"] .pc-art,
+  .flagship .project-card[data-size="wide"] .pc-art {
+    width: 72px; top: auto; right: 14px; bottom: 14px;
+    transform: none; opacity: 0.11;
+  }
+  .project-card[data-size="wide"]:hover .pc-art,
+  .flagship .project-card[data-size="wide"]:hover .pc-art {
+    opacity: 0.16; transform: none;
+  }
   .project-card { min-height: 0; padding: 22px 20px 20px; }
+  /* 主打卡在窄屏收回普通卡的分量，只留左边那条主通道标和更大的名字 */
+  .flagship .project-card { min-height: 0; padding: 24px 20px 22px 28px; }
+  /* 窄屏没有右半区：通栏卡的正文不必再为装饰图让出 58% */
+  .project-card[data-size="wide"] .pc-desc { max-width: none; }
+  .flagship .project-card[data-size="wide"] .pc-desc { max-width: none; }
   /* 链接不许在词中间折断；缩一号让它整条待在一行 */
   .pc-link { font-size: 9.5px; word-break: normal; }
   .marquee { padding: 10px 0; }
