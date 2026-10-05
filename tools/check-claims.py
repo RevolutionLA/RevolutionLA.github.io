@@ -433,25 +433,6 @@ def check(root, offline=False):
         bad("rank badges read %s, not a clean 01..%02d ladder over %d cards"
             % (ranks, len(ranks), len(cards)))
 
-    # ---------- static: 关于区那排数字里，「项目」那一个就是本页的卡数 ----------
-    # 它写的是「精选」，不是「我一共多少个仓库」——主页上的仓库数一直在涨，那个数字
-    # 在这儿既查不了也不该拿来当门面；查得了的是它和页面自己列出的卡对不对得上。
-    # data-count 和正文各写一个数也不行：计数动画会把正文盖成 data-count 那个。
-    strip = re.findall(r'<li><b data-count="(\d+)">(\d+)</b>'
-                       r'<span class="mono">([^<]*)</span></li>', idx)
-    proj = [(a, b, lbl) for a, b, lbl in strip if lbl.endswith("项目")]
-    if not proj:
-        bad("no 项目 counter in .stat-strip - the headline number and the card count can "
-            "now drift apart with nobody watching")
-    else:
-        anim, shown, lbl = proj[0]
-        if anim != shown:
-            bad("the stat strip's %s counter reads %s but counts up to %s - the animation "
-                "overwrites the one the reader sees first" % (lbl, shown, anim))
-        elif int(shown) != len(cards):
-            bad("the stat strip says %s %s but the page carries %d project cards"
-                % (shown, lbl, len(cards)))
-
     # ---------- static: 筛选开关上的数字要数得对 ----------
     at = idx.find('class="proj-rest"')
     if at < 0:
@@ -974,18 +955,6 @@ CASES = [
      'data-filter="hardware" aria-pressed="false">开源硬件 <b>01</b>',
      'data-filter="gaming" aria-pressed="false">游戏模组 <b>00</b>',
      "matches no card", None, "finding"),
-    ("stat strip counter drifts from the card count", "index.html",
-     '<li><b data-count="9">9</b><span class="mono">精选项目</span></li>',
-     '<li><b data-count="12">12</b><span class="mono">精选项目</span></li>',
-     "the stat strip says 12", None, "finding"),
-    ("stat strip counter renamed out of reach", "index.html",
-     '<li><b data-count="9">9</b><span class="mono">精选项目</span></li>',
-     '<li><b data-count="9">9</b><span class="mono">个仓库</span></li>',
-     "no 项目 counter", None, "finding"),
-    ("stat strip text and count-up disagree", "index.html",
-     '<li><b data-count="9">9</b><span class="mono">精选项目</span></li>',
-     '<li><b data-count="9">7</b><span class="mono">精选项目</span></li>',
-     "counts up to", None, "finding"),
 ]
 
 

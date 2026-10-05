@@ -561,9 +561,11 @@ html.has-cursor .cur-dot { margin: -2.5px 0 0 -2.5px; }
 .hs-item b { color: var(--ink); font-weight: 500; }
 
 /* ---------- 标题 ---------- */
+/* 0.92 的行高会把「刘昂」的字面（约 1.08em 高）压进第二行里：
+   绿字顶着笔画。行高交给两行各自管，行距用明确的外边距拉开。 */
 .hero-title {
   margin: clamp(22px, 3.4vh, 40px) 0 clamp(22px, 3.2vh, 34px);
-  line-height: 0.92;
+  line-height: 1;
   letter-spacing: -0.03em;
 }
 .ht-row-1 {
@@ -575,6 +577,7 @@ html.has-cursor .cur-dot { margin: -2.5px 0 0 -2.5px; }
   font-family: var(--cn);
   font-weight: 900;
   font-size: clamp(64px, 12.6vw, 168px);
+  line-height: 1.04;
   letter-spacing: -0.05em;
   color: var(--ink);
   text-shadow: 0 0 60px rgba(230, 236, 244, 0.08);
@@ -597,7 +600,7 @@ html.has-cursor .cur-dot { margin: -2.5px 0 0 -2.5px; }
 }
 .ht-mark b { display: block; font-size: 10px; font-weight: 500; color: var(--ink-dim); }
 .ht-mark i { display: block; font-style: normal; font-size: 9px; color: var(--ink-faint); margin-top: 4px; }
-.ht-row-2 { display: flex; align-items: baseline; gap: 0.16em; }
+.ht-row-2 { display: flex; align-items: baseline; gap: 0.16em; margin-top: clamp(6px, 1.1vh, 14px); }
 .ht-slash {
   font-family: var(--display);
   font-weight: 300;
@@ -616,10 +619,10 @@ html.has-cursor .cur-dot { margin: -2.5px 0 0 -2.5px; }
   text-shadow: 0 0 34px rgba(52, 240, 160, 0.28);
 }
 
-/* ---------- 下半区：文案 + 示波器 ---------- */
+/* ---------- 下半区：文案 + 状态读数 ---------- */
 .hero-lower {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.86fr);
+  grid-template-columns: minmax(0, 1fr) minmax(292px, 0.66fr);
   gap: clamp(28px, 4.4vw, 64px);
   align-items: end;
 }
@@ -640,20 +643,27 @@ html.has-cursor .cur-dot { margin: -2.5px 0 0 -2.5px; }
   white-space: nowrap;
 }
 .hero-actions { display: flex; gap: 14px; flex-wrap: wrap; margin-top: clamp(26px, 4vh, 40px); }
+/* 右列的「状态告示牌」：示波器删掉后，这块地得靠读数本身立住——
+   标签在左、值贴右，虚线分行，跟 SPEC SHEET 用同一套表格语言 */
 .hero-facts {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px 30px;
+  flex-direction: column;
   list-style: none;
-  margin-top: clamp(26px, 4vh, 38px);
-  padding-top: 18px;
-  border-top: 1px solid var(--stroke);
+  border-top: 1px solid var(--stroke-2);
+}
+.hero-facts li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px dashed var(--stroke);
   font-size: 11px;
   letter-spacing: 0.12em;
-  color: var(--ink-dim);
+  color: var(--ink);
 }
-.hero-facts li { display: inline-flex; align-items: center; gap: 8px; }
 .hero-facts span { color: var(--ink-faint); letter-spacing: 0.2em; font-size: 10px; }
+.hero-facts b { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
 
 /* 主打通道：首屏就把最重要的那个项目递到眼前，而不是等访客滚到 04 区 */
 .hero-prime {
@@ -683,79 +693,32 @@ html.has-cursor .cur-dot { margin: -2.5px 0 0 -2.5px; }
 .hero-prime .ico { transition: transform 0.35s var(--ease); }
 .hero-prime:hover .ico, .hero-prime:focus-visible .ico { transform: translateX(4px); }
 
-/* ---------- 示波器 ---------- */
-.scope-panel { overflow: hidden; }
-.scope-screen {
-  position: relative;
-  height: clamp(180px, 24vh, 236px);
-  background:
-    radial-gradient(120% 100% at 50% 0%, rgba(52, 240, 160, 0.055), transparent 70%),
-    var(--space-0);
-  overflow: hidden;
-}
-#scope { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.scope-frame i {
-  position: absolute;
-  width: 11px; height: 11px;
-  border: 1px solid var(--stroke-2);
-}
-.scope-frame i:nth-child(1) { top: 8px; left: 8px; border-right: 0; border-bottom: 0; }
-.scope-frame i:nth-child(2) { top: 8px; right: 8px; border-left: 0; border-bottom: 0; }
-.scope-frame i:nth-child(3) { bottom: 8px; left: 8px; border-right: 0; border-top: 0; }
-.scope-frame i:nth-child(4) { bottom: 8px; right: 8px; border-left: 0; border-top: 0; }
-.scope-hud {
-  position: absolute;
-  left: 14px; bottom: 12px;
+/* ---------- 读数表最后一行：滚动入口 ---------- */
+/* 原来那枚浮在左下角的 SCROLL 提示跟 PRINCIPAL 通道抢同一块地，
+   视口一矮就压在一起。把它改成读数表的 NEXT 行：在流内，永远撞不上，
+   而且「下一站」本来就该长在告示牌上。 */
+.hero-facts .hf-next-row { padding: 0; }
+.hf-next {
   display: flex;
-  gap: 16px;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  color: var(--ink-faint);
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 0;
+  color: var(--ink);
+  text-decoration: none;
 }
-.scope-hud b { color: var(--signal); font-weight: 500; }
-.scope-hint {
-  position: absolute;
-  right: 14px; top: 12px;
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  color: var(--ink-faint);
-  opacity: 0.85;
-}
-
-/* ---------- 滚动提示 ---------- */
-.scroll-cue {
-  position: absolute;
-  left: var(--gut);
-  bottom: 26px;
+.hf-next span { color: var(--ink-faint); letter-spacing: 0.2em; font-size: 10px; }
+.hf-next b {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  font-size: 9px;
-  letter-spacing: 0.3em;
-  color: var(--ink-faint);
+  gap: 8px;
+  font-weight: 500;
   transition: color 0.3s;
 }
-.scroll-cue:hover { color: var(--signal); }
-.sc-line {
-  position: relative;
-  display: block;
-  width: 62px; height: 1px;
-  background: var(--stroke-2);
-  overflow: hidden;
-}
-.sc-line::after {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 22px;
-  background: var(--signal);
-  animation: cue-run 2.4s var(--ease-io) infinite;
-}
-@keyframes cue-run {
-  0% { transform: translateX(-24px); opacity: 0; }
-  30% { opacity: 1; }
-  100% { transform: translateX(64px); opacity: 0; }
-}
+.hf-next .ico { width: 13px; height: 13px; transform: rotate(90deg); transition: transform 0.35s var(--ease); }
+.hf-next:hover, .hf-next:focus-visible { color: var(--signal); outline: none; }
+.hf-next:hover .ico, .hf-next:focus-visible .ico { transform: rotate(90deg) translateX(4px); }
 
 /* ============================================================
    走马灯
@@ -889,36 +852,6 @@ html.has-cursor .cur-dot { margin: -2.5px 0 0 -2.5px; }
   flex: none;
 }
 .data-grid dd { color: var(--ink); text-align: right; display: inline-flex; align-items: center; gap: 8px; }
-
-.stat-strip {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
-  list-style: none;
-  background: var(--stroke);
-  border: 1px solid var(--stroke);
-  border-radius: var(--r-lg);
-  overflow: hidden;
-}
-.stat-strip li {
-  background: var(--space-1);
-  padding: 20px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  transition: background-color 0.4s;
-}
-.stat-strip li:hover { background: var(--space-2); }
-.stat-strip b {
-  font-family: var(--display);
-  font-variation-settings: 'wdth' 112, 'wght' 700;
-  font-size: clamp(30px, 4vw, 44px);
-  line-height: 1;
-  font-weight: 700;
-  color: var(--ink);
-  letter-spacing: -0.03em;
-}
-.stat-strip span { font-size: 10px; letter-spacing: 0.18em; color: var(--ink-faint); }
 
 /* ============================================================
    STACK · 通道条
@@ -1485,7 +1418,6 @@ a:focus-visible, button:focus-visible {
    ============================================================ */
 @media (max-width: 1180px) {
   .hero-lower { grid-template-columns: 1fr; align-items: start; }
-  .scope-panel { max-width: 620px; }
   .sec-head { grid-template-columns: 54px minmax(0, 1fr); }
   .sec-note { grid-column: 2; padding-bottom: 0; }
   .project-card, .project-card[data-size="wide"] { grid-column: span 12; }
@@ -1509,7 +1441,6 @@ a:focus-visible, button:focus-visible {
   .card-head { grid-column: 1; }
   .meter { grid-column: 2; grid-row: 1 / span 3; align-self: center; }
   .card-body { grid-column: 1 / -1; }
-  .hero-facts { gap: 8px 22px; }
 }
 
 @media (max-width: 760px) {
@@ -1539,7 +1470,6 @@ a:focus-visible, button:focus-visible {
   .nav-toggle { display: inline-flex; }
   .nav-cta { display: none; }
   .hero { padding-top: 96px; min-height: auto; }
-  .scroll-cue { display: none; }
   .ht-cn { font-size: clamp(58px, 20vw, 96px); }
   /* 首屏那根横贯线与铭牌在 390 宽下会把名字挤成两行：线让位，铭牌缩小 */
   .ht-rule { display: none; }
@@ -1551,7 +1481,6 @@ a:focus-visible, button:focus-visible {
   .hero-prime { width: 100%; flex-wrap: wrap; gap: 6px 11px; }
   .hp-note { white-space: normal; }
   .sec-head { grid-template-columns: 40px minmax(0, 1fr); gap: 16px; }
-  .stat-strip { grid-template-columns: 1fr; }
   .contact-body { padding: 26px 20px; }
   .btn { width: 100%; justify-content: center; }
   .contact-actions { flex-direction: column; }
@@ -1596,7 +1525,7 @@ a:focus-visible, button:focus-visible {
 /* 尊重减少动效偏好 */
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .led-on, .mq-track, .sc-line::after, .boot.go .boot-fill, .boot.go .boot-lines li { animation: none; }
+  .led-on, .mq-track, .boot.go .boot-fill, .boot.go .boot-lines li { animation: none; }
   .reveal, .reveal-line { opacity: 1; transform: none; clip-path: none; transition: none; }
   .tl-run { stroke-dashoffset: 0; transition: none; }
   .tl-tip { opacity: 1; transition: none; }

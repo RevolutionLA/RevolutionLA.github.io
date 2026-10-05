@@ -5,9 +5,9 @@
    三条硬规矩
      1. 任何动画都要给 prefers-reduced-motion 一条静态出路（不是「删掉」，
         而是「渲染成最终态」）。
-     2. 所有绘制走一个 rAF 循环：页面不可见就停表，示波画面不在视口内就停表，
-        常驻背景静置四秒后降半速——任何输入立刻回到满帧。
-     3. JS 缺席时页面必须完整可读：装饰件（光标/示波器/开机）自行隐身。
+     2. 所有绘制走一个 rAF 循环：页面不可见就停表，常驻背景静置四秒后降半速——
+        任何输入立刻回到满帧。
+     3. JS 缺席时页面必须完整可读：装饰件（光标/开机）自行隐身。
      4. 系统偏好可以在页面开着的时候改，所以「减少动效」是活的监听，不是加载时的一次快照。
    ============================================================ */
 
@@ -471,141 +471,10 @@
   })();
 
   /* ==========================================================
-     5 · 示波器（指针调制 + 余辉）
-     ========================================================== */
-  (function scope() {
-    var cv = doc.getElementById('scope');
-    var screen = doc.getElementById('scope-screen');
-    var ctx = cv && cv.getContext && cv.getContext('2d');
-    if (!ctx) return;
-    var hud = {
-      freq: doc.querySelector('[data-scope="freq"]'),
-      amp: doc.querySelector('[data-scope="amp"]'),
-      sweep: doc.querySelector('[data-scope="sweep"]')
-    };
-    var w = 0, h = 0, dpr = 1, t = 0, visible = true;
-    var target = { x: 0.5, y: 0.5 }, cur = { x: 0.5, y: 0.5 }, active = false;
-
-    function build() {
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
-      w = screen.clientWidth;
-      h = screen.clientHeight;
-      if (!w || !h) return;
-      cv.width = Math.round(w * dpr);
-      cv.height = Math.round(h * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, w, h);
-    }
-
-    function wave(x, time, amp, f1, f2) {
-      return Math.sin(x * f1 + time) * 0.62
-        + Math.sin(x * f2 - time * 1.7) * 0.26
-        + Math.sin(x * 31.4 + time * 2.4) * 0.12 * amp;
-    }
-
-    function frame(ts, dt) {
-      if (!w || !h) { build(); return; }
-      if (!visible) return;
-      var k = reduced ? 0 : dt / 1000;
-      t += k * 1.9;
-      /* 指针缓动逼近：让调制是「跟手」而不是「跳变」 */
-      cur.x += (target.x - cur.x) * Math.min(1, k * 4.5);
-      cur.y += (target.y - cur.y) * Math.min(1, k * 4.5);
-
-      var amp = 0.34 + cur.y * 0.5 + (active ? 0.1 : 0);
-      var f1 = 7 + cur.x * 26;
-      var f2 = 17 + cur.x * 44;
-
-      /* 余辉：不清屏，压一层半透明底盘 */
-      ctx.fillStyle = 'rgba(6,8,12,0.32)';
-      ctx.fillRect(0, 0, w, h);
-
-      /* 网格 */
-      ctx.strokeStyle = 'rgba(148,168,190,0.075)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (var gx = 0; gx <= 10; gx++) {
-        var px = Math.round(w * gx / 10) + 0.5;
-        ctx.moveTo(px, 0); ctx.lineTo(px, h);
-      }
-      for (var gy = 0; gy <= 6; gy++) {
-        var py = Math.round(h * gy / 6) + 0.5;
-        ctx.moveTo(0, py); ctx.lineTo(w, py);
-      }
-      ctx.stroke();
-
-      /* 中线 */
-      ctx.strokeStyle = 'rgba(148,168,190,0.16)';
-      ctx.beginPath();
-      ctx.moveTo(0, Math.round(h / 2) + 0.5); ctx.lineTo(w, Math.round(h / 2) + 0.5);
-      ctx.stroke();
-
-      /* 波形 */
-      var mid = h / 2, span = h * 0.36, step = 2;
-      ctx.lineWidth = 1.6;
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = '#34f0a0';
-      ctx.shadowColor = 'rgba(52,240,160,0.55)';
-      ctx.shadowBlur = 12;
-      ctx.beginPath();
-      for (var x = 0; x <= w; x += step) {
-        var u = x / w * 6.2832;
-        var y = mid - wave(u, t, amp, f1, f2) * span * amp;
-        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-
-      /* 扫描头 */
-      var hx = ((t * 0.16) % 1) * w;
-      var hu = hx / w * 6.2832;
-      var hy = mid - wave(hu, t, amp, f1, f2) * span * amp;
-      ctx.strokeStyle = 'rgba(52,240,160,0.22)';
-      ctx.beginPath(); ctx.moveTo(hx, 0); ctx.lineTo(hx, h); ctx.stroke();
-      ctx.fillStyle = '#8fffce';
-      ctx.beginPath(); ctx.arc(hx, hy, 2.2, 0, 6.2832); ctx.fill();
-
-      if (hud.freq) hud.freq.textContent = (1 + cur.x * 3.4).toFixed(2);
-      if (hud.amp) hud.amp.textContent = (0.3 + amp * 0.72).toFixed(2);
-      if (hud.sweep) hud.sweep.textContent = (8.5 - cur.x * 5.5).toFixed(1);
-    }
-
-    build();
-    window.addEventListener('resize', build, { passive: true });
-
-    if (fine && screen) {
-      screen.addEventListener('pointermove', function (e) {
-        var r = screen.getBoundingClientRect();
-        target.x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-        target.y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
-        active = true;
-      });
-      screen.addEventListener('pointerleave', function () {
-        active = false;
-        target.x = 0.5; target.y = 0.42;
-      });
-    }
-
-    if ('IntersectionObserver' in window && screen) {
-      new IntersectionObserver(function (en) {
-        visible = en[0].isIntersecting;
-      }, { threshold: 0 }).observe(screen);
-    }
-
-    if (reduced) { frame(0, 16); frame(0, 16); }
-    else ticker.add(frame);
-    /* 这块表也得听得见系统偏好的变化：关掉时摘掉回路，别只是「看起来不动」 */
-    motionHooks.push(function (off) {
-      if (off) { ticker.remove(frame); frame(0, 16); frame(0, 16); }
-      else ticker.add(frame);
-    });
-  })();
-
-  /* ==========================================================
-     6 · 显现编排
+     5 · 显现编排
      ========================================================== */
   var REVEALS = [
-    ['.hero-strip', 0], ['.hero-title', 60], ['.hero-lower', 220], ['.scroll-cue', 520],
+    ['.hero-strip', 0], ['.hero-title', 60], ['.hero-lower', 220],
     ['.sec-head', 0], ['.about-main > *', 0], ['.about-side', 120],
     ['.stack-card', 0], ['.proj-group', 0], ['.proj-rest .project-card', 0],
     ['.tl-item', 0], ['.sig-card', 0],
@@ -635,7 +504,7 @@
   }
 
   /* ==========================================================
-     7 · 导航：粘性态 / 当前区块 / 窄屏抽屉
+     6 · 导航：粘性态 / 当前区块 / 窄屏抽屉
      ========================================================== */
   (function nav() {
     var header = doc.querySelector('.site-header');
@@ -714,7 +583,7 @@
   })();
 
   /* ==========================================================
-     8 · 自定义光标 + 磁吸按钮
+     7 · 自定义光标 + 磁吸按钮
      ========================================================== */
   (function cursor() {
     if (!fine || reduced) return;
@@ -775,7 +644,7 @@
   })();
 
   /* ==========================================================
-     9 · 能力矩阵：电平 + SOLO
+     8 · 能力矩阵：电平 + SOLO
      ========================================================== */
   (function stack() {
     var strip = doc.querySelector('.stack-strip');

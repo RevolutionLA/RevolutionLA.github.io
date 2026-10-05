@@ -89,7 +89,7 @@ def font(spec, size):
     return ImageFont.truetype(path, size, index=index)
 
 
-# 示波器波形（右下角，站点 hero 同款折线语汇）
+# 信号波形（右下角，全站粒子场的折线语汇）
 pts = []
 for px in range(0, W + 1, 3):
     t = px / W
