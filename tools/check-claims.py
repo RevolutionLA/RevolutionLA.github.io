@@ -862,10 +862,19 @@ def stars_of(owner, repo):
     if code != 200:
         return code, None, "http-%s" % code
     low = body.lower()
-    if b"repo-stars-counter-star" not in low and any(m in low for m in BLOCK_MARKERS):
+    txt = body.decode("utf-8", "replace")
+    # 2026-10-09: GitHub replaced the old `id="repo-stars-counter-star" title="N"'
+    # button with a Primer/React component, so every badge on the page went unread -
+    # ten "the scraper is blind" findings at once, which is the correct loud failure.
+    # The count now lives in a CounterLabel span following the star button, and it is
+    # rendered even at zero (verified against a 0-star repo), so an absent counter
+    # still means "this script stopped reading GitHub", not "the repo has no stars".
+    if b'data-testid="star-button"' not in low and any(m in low for m in BLOCK_MARKERS):
         return 200, None, "blocked"
-    m = re.search(r'repo-stars-counter-star[^>]*title="([\d,]+)"',
-                  body.decode("utf-8", "replace"))
+    at = txt.find('data-testid="star-button"')
+    if at < 0:
+        return 200, None, "unparsed"
+    m = re.search(r'CounterLabel[^>]*>\s*<span[^>]*>([\d,]+)</span>', txt[at:at + 3000])
     return (200, int(m.group(1).replace(",", "")), "ok") if m else (200, None, "unparsed")
 
 
@@ -1117,6 +1126,34 @@ def _unit_httperror_body_survives():
     return None
 
 
+def _unit_star_parser_reads_current_markup():
+    """The counterpart to the blindness case: the parser must read TODAY's markup.
+
+    Snippets are copied verbatim from three live repo pages on 2026-10-09 (217 / 1 / 0
+    stars). The zero matters: GitHub renders the counter at zero, so "no counter" is
+    evidence the scraper broke, never evidence the repo is unstarred - and a test that
+    only covered nonzero counts would let a parser that drops zeros pass.
+    """
+    global fetch
+    saved = fetch
+    tail = ('Star<span aria-hidden="true" data-variant="secondary" '
+            'data-component="CounterLabel" class="ml-1 '
+            'prc-CounterLabel-CounterLabel-X-kRU"><span>%s</span></span>')
+    try:
+        for want in ("217", "1", "0"):
+            body = ('<html><button data-component="Button" type="button" '
+                    'data-testid="star-button" class="prc-Button-ButtonBase-9n-Xk">'
+                    '<svg></svg></span>' + (tail % want) + "</button></html>").encode()
+            fetch = lambda url, retries=2, _b=body: (200, _b)
+            code, n, state = stars_of("RevolutionLA", "x")
+            if state != "ok" or n != int(want):
+                return ("stars_of read GitHub's current counter markup as (%r, %r) "
+                        "for a page showing %s stars" % (state, n, want))
+    finally:
+        fetch = saved
+    return None
+
+
 def _unit_blocked_page_is_not_blindness():
     """Deterministic P2-4 regression: GitHub's 200 abuse interstitial must read as
     'the environment is throttling us', not as 'the scraper broke'."""
@@ -1216,6 +1253,7 @@ UNIT_CASES = [
     ("transport classification table", _unit_transport_table),
     ("curl 000 is transport, not HTTP 0", _unit_curl_000),
     ("star parser blindness is not 'ok'", _unit_star_parser_blindness),
+    ("star parser reads GitHub's current markup", _unit_star_parser_reads_current_markup),
     ("curl HEAD reports the status it saw, not 200", _unit_head_status_is_observed),
     ("GitHub block page is not scraper blindness", _unit_blocked_page_is_not_blindness),
     ("HTTPError keeps the body that explains the verdict", _unit_httperror_body_survives),
