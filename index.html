@@ -95,8 +95,8 @@
     "@context": "https://schema.org",
     "@type": "ItemList",
     "name": "刘昂 (RevolutionLA) 的开源项目",
-    "numberOfItems": 9,
-    "description": "由刘昂开发与维护的开源项目，按 GitHub star 数从高到低排列：AI 音乐生成工作站、昇腾智算部署工具链、DeepSeek Harness 插件生态、Agent Skill 与开源硬件。",
+    "numberOfItems": 10,
+    "description": "由刘昂开发与维护的开源项目，按 GitHub star 数从高到低排列：AI 音乐生成工作站、昇腾智算部署工具链、DeepSeek Harness 插件生态、Agent Skill、语音输入插件与开源硬件。",
     "itemListOrder": "https://schema.org/ItemListOrderDescending",
     "itemListElement": [
       {
@@ -203,6 +203,18 @@
           "sameAs": "https://github.com/RevolutionLA/shijing",
           "description": "用 Python 统计《诗经》全文用字概率，jieba 分词后输出字云与词云的数据可视化小品。",
           "applicationCategory": "DataVisualization",
+          "author": { "@id": "https://revolutionla.github.io/#liuang" }
+        }
+      },
+      {
+        "@type": "ListItem", "position": 10,
+        "item": {
+          "@type": "SoftwareApplication",
+          "name": "nextless",
+          "url": "https://github.com/RevolutionLA/nextless",
+          "sameAs": "https://github.com/RevolutionLA/nextless",
+          "description": "Nextless：Linux fcitx5 的按住说话语音输入插件——触发键可自定义、离线中英识别、本地标点、错词修正表，.deb 一键安装，评测基准连原始数据一起公开。",
+          "applicationCategory": "UtilityApplication",
           "author": { "@id": "https://revolutionla.github.io/#liuang" }
         }
       }
@@ -498,7 +510,7 @@
         <span class="sec-kicker mono">WORK · 项目</span>
         <h2 class="sec-title">代表作品</h2>
       </div>
-      <p class="sec-note">把想法做成能跑的东西。以下 9 个项目全部由我本人开发与维护，按 GitHub star 数从高到低排；排在第一的那一个，恰好也是我最重视的，所以给它单开了一块主打面板。想只看某一类，用下面的分类开关。star 读数取自 <a class="sn-link" href="https://github.com/RevolutionLA?tab=repositories" target="_blank" rel="noopener noreferrer">github.com/RevolutionLA</a>。</p>
+      <p class="sec-note">把想法做成能跑的东西。以下 10 个项目全部由我本人开发与维护，按 GitHub star 数从高到低排；排在第一的那一个，恰好也是我最重视的，所以给它单开了一块主打面板。想只看某一类，用下面的分类开关。star 读数取自 <a class="sn-link" href="https://github.com/RevolutionLA?tab=repositories" target="_blank" rel="noopener noreferrer">github.com/RevolutionLA</a>。</p>
     </div>
 
     <!-- ===== 01 · 主打：常驻最上方，不参与筛选 ===== -->
@@ -519,16 +531,16 @@
 
     <div class="proj-rest">
       <div class="proj-rest-head">
-        <h3 class="pg-head mono"><span class="pg-label">RANKED · 02–09 按 star 降序</span><span class="pg-rule" aria-hidden="true"></span><span class="pg-count">08</span></h3>
+        <h3 class="pg-head mono"><span class="pg-label">RANKED · 02–10 按 star 降序</span><span class="pg-rule" aria-hidden="true"></span><span class="pg-count">09</span></h3>
         <div class="filters mono" role="group" aria-label="按分类筛选项目">
-          <button type="button" class="chip is-on" data-filter="all" aria-pressed="true">ALL <b>08</b></button>
+          <button type="button" class="chip is-on" data-filter="all" aria-pressed="true">ALL <b>09</b></button>
           <button type="button" class="chip" data-filter="music" aria-pressed="false">AI · 音乐 <b>02</b></button>
           <button type="button" class="chip" data-filter="hardware" aria-pressed="false">开源硬件 <b>01</b></button>
           <button type="button" class="chip" data-filter="ascend" aria-pressed="false">昇腾智算 <b>02</b></button>
           <button type="button" class="chip" data-filter="skill" aria-pressed="false">Agent 工程 <b>01</b></button>
-          <button type="button" class="chip" data-filter="local" aria-pressed="false">本地 AI · 数据 <b>02</b></button>
+          <button type="button" class="chip" data-filter="local" aria-pressed="false">本地 AI · 数据 <b>03</b></button>
         </div>
-        <p class="filt-status mono" role="status">当前显示 <b>全部 08 个</b> · 主打那一张不参与筛选</p>
+        <p class="filt-status mono" role="status">当前显示 <b>全部 09 个</b> · 主打那一张不参与筛选</p>
       </div>
 
       <div class="projects-grid">
@@ -595,6 +607,14 @@
           <p class="pc-desc">用 Python 统计《诗经》全文用字概率，jieba 分词，输出字云与词云——用工程思维读一次先秦诗歌的频次之美。</p>
           <span class="pc-meta mono"><i>DATA ART</i><i>PYTHON</i></span>
           <span class="pc-link mono">github.com/RevolutionLA/shijing <svg class="ico" aria-hidden="true"><use href="#i-arrow"/></svg></span>
+        </a>
+        <a class="project-card" href="https://github.com/RevolutionLA/nextless" data-cat="local" data-art="pen" target="_blank" rel="noopener noreferrer">
+          <span class="pc-art" aria-hidden="true"><svg viewBox="0 0 48 32"><use href="#i-pen"/></svg></span>
+          <span class="pc-status mono"><i class="pc-rank">10</i>● 开源插件 · 0★</span>
+          <h4 class="pc-name">nextless</h4>
+          <p class="pc-desc">语音输入插件 Nextless——fcitx5 按住说话：触发键随手改（右 Ctrl 就行）、离线中英识别、本地标点、错词修正表，.deb 一键装，评测基准连原始数据一起公开（在 xander-lin/vinput 基础上重构）。</p>
+          <span class="pc-meta mono"><i>输入法</i><i>LINUX</i></span>
+          <span class="pc-link mono">github.com/RevolutionLA/nextless <svg class="ico" aria-hidden="true"><use href="#i-arrow"/></svg></span>
         </a>
       </div>
     </div>

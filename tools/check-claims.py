@@ -876,7 +876,7 @@ CASES = [
     # mode: "finding"  -> some finding must contain `expect`
     #       "transport"-> no finding may accuse the mutated URL of being dead, and
     #                      an inconclusive must mention it (a refusal to guess)
-    ("project count claim", "index.html", "以下 9 个项目", "以下 42 个项目", "prose says", None, "finding"),
+    ("project count claim", "index.html", "以下 10 个项目", "以下 42 个项目", "prose says", None, "finding"),
     ("dead link", "index.html", "https://github.com/RevolutionLA/shijing",
      "https://github.com/RevolutionLA/thisRepoDoesNotExist-42", "visitors cannot reach", "github", "finding"),
     ("sub-threshold small text", "assets/css/styles.css",
