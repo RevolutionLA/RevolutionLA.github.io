@@ -941,11 +941,11 @@ CASES = [
      '<i class="pc-rank">09</i>', "rank badges", None, "finding"),
     ("filter chip count drift", "index.html", "AI · 音乐 <b>02</b>",
      "AI · 音乐 <b>07</b>", "filter chip", None, "finding"),
-    ("npm download claim removed", "index.html", "累计 <b>54,347</b> 次下载",
+    ("npm download claim removed", "index.html", "累计 <b>67,058</b> 次下载",
      "很多人装", "gone blind", None, "finding"),
-    ("npm cumulative claim overstated", "index.html", "累计 <b>54,347</b> 次下载",
+    ("npm cumulative claim overstated", "index.html", "累计 <b>67,058</b> 次下载",
      "累计 <b>9,999,999</b> 次下载", "overstates the total", "npm", "finding"),
-    ("npm cumulative claim left behind", "index.html", "累计 <b>54,347</b> 次下载",
+    ("npm cumulative claim left behind", "index.html", "累计 <b>67,058</b> 次下载",
      "累计 <b>1,000</b> 次下载", "behind", "npm", "finding"),
     # 这一组测的是「检查本身会不会变瞎」：每条都制造一个盲区或一处自相矛盾，
     # 而矛盾恰好落在刚加固过的那几条守卫上（pg-count / 名次徽章 / ★ 徽章 / ItemList 顺序）。
