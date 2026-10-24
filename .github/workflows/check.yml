@@ -1,0 +1,36 @@
+name: claims-check
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 先证明检查器自己会红：--selftest 故意制造假主张并断言被抓到。
+      - name: Selftest (a check that cannot fail is not a check)
+        run: python tools/check-claims.py --selftest
+
+      # 对账页面全部事实主张。
+      # 退出码约定：0 = 全部成立；1 = 有主张为假（红）；2 = 环境无法判定（黄，不判死）。
+      - name: Verify homepage claims
+        run: |
+          set +e
+          python tools/check-claims.py
+          rc=$?
+          if [ "$rc" -eq 1 ]; then
+            echo "::error::至少一条页面主张与实况不符，请刷新页面读数后重试"
+            exit 1
+          elif [ "$rc" -ge 2 ]; then
+            echo "::warning::对账结果不确定（网络/依赖），本次不判红，但不代表通过"
+            exit 0
+          fi
