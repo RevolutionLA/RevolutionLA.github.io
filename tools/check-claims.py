@@ -890,12 +890,12 @@ CASES = [
      "https://github.com/RevolutionLA/thisRepoDoesNotExist-42", "visitors cannot reach", "github", "finding"),
     ("sub-threshold small text", "assets/css/styles.css",
      "--ink-faint: #8290a2", "--ink-faint: #5d6878", "text is", None, "finding"),
-    ("stale star badge", "index.html", "开源工作站 · 4★", "开源工作站 · 999★", "badge says", "github", "finding"),
+    ("stale star badge", "index.html", "开源工作站 · 9★", "开源工作站 · 999★", "badge says", "github", "finding"),
     ("star badge the checker cannot cover", "index.html",
      '<h4 class="pc-name">adversarial-review</h4>', '<h4 class="pc-name">adversarial-reviewx</h4>',
      "no repo in ItemList sameAs", None, "finding"),
-    ("false 收录 claim", "index.html", "收录近 70 个", "收录近 900 个", "claim '", "raw", "finding"),
-    ("收录 claim removed", "index.html", "收录近 70 个", "收录一批", "gone blind", None, "finding"),
+    ("false 收录 claim", "index.html", "收录近 80 个", "收录近 900 个", "claim '", "raw", "finding"),
+    ("收录 claim removed", "index.html", "收录近 80 个", "收录一批", "gone blind", None, "finding"),
     # the mobile-nav invariant, proven able to fail: hide the list the way the page
     # did for four review rounds and the checker must say so
     ("mobile nav hidden with no toggle", "index.html",
@@ -935,7 +935,7 @@ CASES = [
      '"item": {', '"items": {',
      "carries no object-valued 'item'", None, "finding"),
     # 排名榜的三条：顺序、名次编号、开关计数，都是纯静态就能判的
-    ("star ranking claim broken", "index.html", "精选清单 · 10★", "精选清单 · 1★",
+    ("star ranking claim broken", "index.html", "精选清单 · 19★", "精选清单 · 1★",
      "ordered by stars", None, "finding"),
     ("rank badge out of order", "index.html", '<i class="pc-rank">05</i>',
      '<i class="pc-rank">09</i>', "rank badges", None, "finding"),
@@ -949,12 +949,12 @@ CASES = [
      "累计 <b>1,000</b> 次下载", "behind", "npm", "finding"),
     # 这一组测的是「检查本身会不会变瞎」：每条都制造一个盲区或一处自相矛盾，
     # 而矛盾恰好落在刚加固过的那几条守卫上（pg-count / 名次徽章 / ★ 徽章 / ItemList 顺序）。
-    ("RANKED head count drift", "index.html", '<span class="pg-count">08</span>',
-     '<span class="pg-count">07</span>', "RANKED head counts", None, "finding"),
+    ("RANKED head count drift", "index.html", '<span class="pg-count">09</span>',
+     '<span class="pg-count">08</span>', "RANKED head counts", None, "finding"),
     ("a card loses its rank badge", "index.html", '<i class="pc-rank">05</i>',
      '<i class="pc-place">05</i>', "every card must carry", None, "finding"),
     ("star badge written in a way nobody can read", "index.html",
-     '<i class="pc-rank">09</i>● 数据小品 · 0★',
+     '<i class="pc-rank">10</i>● 数据小品 · 0★',
      '<i class="pc-rank">09</i>● 数据小品 · 200+★', "cannot parse", None, "finding"),
     ("structured data says ascending", "index.html", "ItemListOrderDescending",
      "ItemListOrderAscending", "itemListOrder", None, "finding"),
