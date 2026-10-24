@@ -2,13 +2,23 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://revolutionla.github.io/</loc>
-    <lastmod>2026-10-17</lastmod>
+    <lastmod>2026-10-24</lastmod>
     <changefreq>monthly</changefreq>
     <priority>1.0</priority>
   </url>
   <!-- GitHub Pages 路径大小写敏感：下面的 loc 必须与仓库名逐字符一致。
-       lastmod 取自线上响应的 Last-Modified 并折算成北京时间（UTC+8）——
-       检查器按同一套约定比对，两侧混用会留下盲区。 -->
+
+       lastmod 的语义是「这个页面的内容最后改动于」，不是「这个站最后一次构建于」。
+       两者在 Pages 上不是一回事：任何一次 push（哪怕只改 README 或一个 workflow）
+       都会让部署响应的 Last-Modified 往前跳，而页面正文可能一个字节都没变。
+       所以这里一律按「内容改动日」记：
+         - 站点根：取本仓库 index.html 的最后一次提交日。tools/check-claims.py 会拿
+           git 逐字对账，改版忘了同步就会红——这条是硬约束。
+         - 子项目页：取对应仓库最后一次内容提交日。本仓库无法证明它，所以不设等式
+           断言，只用「不得晚于部署日」这条单向边界兜底。
+       单向边界的意思是：内容不可能在页面发布之后才被改动，故 lastmod 晚于线上
+       Last-Modified 就是假主张；而早于部署日是正常现象（这段时间没人动过页面），
+       不判红。 -->
   <url>
     <loc>https://revolutionla.github.io/dsh-dream-skin/</loc>
     <lastmod>2026-08-24</lastmod>
@@ -17,7 +27,7 @@
   </url>
   <url>
     <loc>https://revolutionla.github.io/AscendMate/</loc>
-    <lastmod>2026-09-17</lastmod>
+    <lastmod>2026-10-24</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>

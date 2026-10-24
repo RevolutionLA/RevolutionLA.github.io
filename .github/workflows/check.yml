@@ -10,7 +10,11 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 是必需的，不是保险：站点根的 lastmod 由 git 提交日对账，
+      # 浅克隆里 index.html 的那次提交不在本地，校验器只能报「无法判定」而失去约束力。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:

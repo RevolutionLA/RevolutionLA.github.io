@@ -281,6 +281,43 @@ def last_modified(url):
     return code, _parse_lm(headers.get("last-modified"))
 
 
+def _git_content_date(root, path):
+    """(date, why) for the commit that last touched `path`, or (None, why).
+
+    A sitemap <lastmod> asks "when did this page's content change?", and git is the only
+    source in this repo that answers it. Everything that stops git from answering - no
+    binary, not a checkout, a shallow clone that does not carry the touching commit -
+    returns None plus a reason, so the caller prints "unverified" instead of inventing a
+    verdict. A shallow clone returning HEAD's date would be the worst outcome here: it
+    reads as a confident finding and blames a page that never changed.
+    """
+    exe = shutil.which("git")
+    if not exe:
+        return None, "git is not installed"
+    if not os.path.isdir(os.path.join(root, ".git")):
+        return None, "no git history here (run from a checkout)"
+
+    def run(*args):
+        return subprocess.run([exe, "-C", root] + list(args),
+                              capture_output=True, text=True, timeout=60)
+
+    try:
+        try:
+            if run("rev-parse", "--is-shallow-repository").stdout.strip() == "true":
+                return None, "shallow clone - the commit that touched it is not here"
+        except subprocess.SubprocessError:
+            pass  # older git: no such flag. The log call below still decides.
+        out = run("log", "-1", "--format=%cs", "--", path).stdout.strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, "git failed (%s)" % type(e).__name__
+    if not out:
+        return None, "no commit touches %s" % path
+    try:
+        return datetime.date.fromisoformat(out), ""
+    except ValueError:
+        return None, "unparseable git date %r" % out
+
+
 def png_size(path):
     """Read IHDR directly: a missing Pillow is an environment gap, not a false claim."""
     with open(path, "rb") as f:
@@ -680,6 +717,21 @@ def check(root, offline=False):
         for loc, declared_s in sm_dates:
             if datetime.date.fromisoformat(declared_s) > datetime.date.today():
                 bad("sitemap lastmod %s for %s is in the future" % (declared_s, loc))
+        # The site root is the one entry this repo can vouch for from its OWN history,
+        # so it is held to git instead of to the deploy header. A sitemap <lastmod> means
+        # "the page's content changed on this date"; Pages' Last-Modified means "this
+        # build ran at", and every unrelated push re-stamps it. Comparing the two for
+        # equality is what reddened this board the day after any README edit - the fix
+        # is to ask git the question the tag actually asks (review P1-D).
+        for loc, declared_s in sm_dates:
+            if not re.match(r"https://revolutionla\.github\.io/?$", loc):
+                continue
+            got, why = _git_content_date(root, "index.html")
+            if got is None:
+                unk("root lastmod %s unverified - %s" % (declared_s, why))
+            elif abs((datetime.date.fromisoformat(declared_s) - got).days) > 1:
+                bad("sitemap says the site root lastmod %s, but git last changed "
+                    "index.html on %s" % (declared_s, got.isoformat()))
         for loc in sm_locs:
             seg = re.match(r"https://revolutionla\.github\.io/([^/]+)/?$", loc)
             if not seg:
@@ -726,9 +778,16 @@ def check(root, offline=False):
         elif code != 200:
             bad("anonymous %s for %s (visitors cannot reach it)" % (code, u))
 
-    # ---------- network: sitemap lastmod must be backed by the deployed page ----------
-    # Pages stamps Last-Modified at build time, so it is the only date a live URL can
-    # vouch for. Writing this sitemap without that check put 3 of 4 dates a month ahead.
+    # ---------- network: a lastmod may not run ahead of the deployed page ----------
+    # This is a ONE-WAY bound, not an equality. Pages stamps Last-Modified at build
+    # time, which means "this deploy ran at", not "the content changed at": every
+    # unrelated push (a README edit, a workflow tweak) moves it forward while the page
+    # body stays byte-identical. Testing equality therefore reds the board the day after
+    # any commit and says a true sitemap is lying - the exact inversion this file exists
+    # to prevent. What a deploy CAN prove is the impossible direction: content cannot be
+    # modified after it was published, so declared > live is a real false claim.
+    # A date behind the deploy is normal (nothing touched the page since) and is left to
+    # the git check on the root entry, the only one this repo can attest.
     # Tolerance is +-1 day on purpose: the header is UTC while a hand-written lastmod is
     # a local calendar date, so the two conventions legitimately differ by a day
     # (review P2-A: three entries said 08-23 where the page said 08-23 GMT / 08-24 local).
@@ -746,11 +805,9 @@ def check(root, offline=False):
                 % (code, loc, THROTTLE[code], declared_s))
         elif live is None:
             unk("no Last-Modified header for %s; lastmod %s unverified" % (loc, declared_s))
-        elif abs((declared - live).days) > 1:
-            bad("sitemap says %s lastmod %s, but the deployed page reports %s"
-                % (loc, declared_s, live))
-        elif declared > live:
-            unk("%s lastmod %s is ahead of the deployed page (%s) - ok only if a push follows"
+        elif (declared - live).days > 1:
+            bad("sitemap says %s lastmod %s, but the deployed page reports %s - content "
+                "cannot change after the page that carries it was published"
                 % (loc, declared_s, live))
 
     # ---------- network: star badges against the live repo page ----------
@@ -1249,6 +1306,85 @@ def _unit_throttle_is_not_a_dead_link():
     return None
 
 
+def _unit_redeploy_is_not_a_stale_lastmod():
+    """A push that never touches the page still re-stamps Pages' Last-Modified, so a
+    lastmod OLDER than the deploy date is normal. This is exactly the red that shipped
+    once (the whole board went red the day after a README edit and blamed a true
+    sitemap), so the relaxation gets a case of its own: a mutation case can prove the
+    checker still reds a lie, but only a stubbed case can prove it stays SILENT on the
+    normal shape.
+
+    Stubbed end to end: no network, no git.
+    """
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="claims-redeploy-")
+    global fetch, _head_headers, _git_content_date
+    saved = (fetch, _head_headers, _git_content_date)
+    try:
+        _copy_site(ROOT, tmp)
+        sm = os.path.join(tmp, "sitemap.xml")
+        s = open(sm, encoding="utf-8").read()
+        # Every entry declared years before the deploy that is serving it.
+        s = re.sub(r"(<lastmod>)\d{4}-\d{2}-\d{2}(</lastmod>)",
+                   r"\g<1>2020-01-01\g<2>", s)
+        open(sm, "w", encoding="utf-8").write(s)
+        # 429 for bodies: the throttle case already proves that yields no finding on its
+        # own, so anything left in `found` below came from the date comparison.
+        fetch = lambda url, retries=2: (429, b"")
+        _head_headers = lambda url, timeout=25: (
+            200, {"last-modified": "Sat, 24 Oct 2026 05:32:43 GMT"})
+        _git_content_date = lambda root, path: (None, "stubbed for this case")
+        found, unknown = check(tmp, offline=False)
+    finally:
+        fetch, _head_headers, _git_content_date = saved
+        shutil.rmtree(tmp, ignore_errors=True)
+    blamed = [f for f in found if "lastmod" in f]
+    if blamed:
+        return ("an older-than-deploy lastmod was read as a false claim: %r" % blamed[0])
+    return None
+
+
+def _unit_git_content_date_reads_history():
+    """The root lastmod is anchored to git, so the anchor itself needs a case: it must
+    read a real commit's date, and it must REFUSE to answer when there is no history
+    instead of returning "today" (which would red a page nobody touched)."""
+    import tempfile
+    if not shutil.which("git"):
+        return SKIP + " git is not installed"
+    tmp = tempfile.mkdtemp(prefix="claims-gitdate-")
+    try:
+        env = dict(os.environ,
+                   GIT_AUTHOR_DATE="2021-03-04T12:00:00",
+                   GIT_COMMITTER_DATE="2021-03-04T12:00:00",
+                   GIT_AUTHOR_NAME="selftest", GIT_AUTHOR_EMAIL="selftest@example.invalid",
+                   GIT_COMMITTER_NAME="selftest",
+                   GIT_COMMITTER_EMAIL="selftest@example.invalid")
+        open(os.path.join(tmp, "index.html"), "w", encoding="utf-8").write("x\n")
+        for args in (["init", "-q"], ["add", "index.html"], ["commit", "-qm", "c"]):
+            r = subprocess.run([shutil.which("git"), "-C", tmp] + args,
+                               capture_output=True, text=True, env=env)
+            if r.returncode != 0:
+                return SKIP + " git refused to build a fixture here: %s" % (
+                    (r.stderr or r.stdout).strip().splitlines() or ["?"])[-1][:120]
+        got, why = _git_content_date(tmp, "index.html")
+        if got is None:
+            return "declined on a repo that does have history: %s" % why
+        if got.isoformat() != "2021-03-04":
+            return "read %s, the commit was made 2021-03-04" % got.isoformat()
+        bare = tempfile.mkdtemp(prefix="claims-nogit-")
+        try:
+            got2, why2 = _git_content_date(bare, "index.html")
+        finally:
+            shutil.rmtree(bare, ignore_errors=True)
+        if got2 is not None:
+            return "invented the date %s without any history" % got2
+        if "history" not in why2:
+            return "gave no usable reason without history: %r" % why2
+        return None
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 UNIT_CASES = [
     ("transport classification table", _unit_transport_table),
     ("curl 000 is transport, not HTTP 0", _unit_curl_000),
@@ -1261,6 +1397,10 @@ UNIT_CASES = [
      _unit_throttle_is_not_a_dead_link),
     ("probe asks the endpoint the verdict comes from",
      _unit_probe_asks_the_endpoint_that_matters),
+    ("a redeploy must not make a true lastmod look false",
+     _unit_redeploy_is_not_a_stale_lastmod),
+    ("root lastmod anchor reads git, and declines without history",
+     _unit_git_content_date_reads_history),
 ]
 
 
